@@ -199,7 +199,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
--   Inspired by [Marta](https://marta.raycast.com/) file manager
+-   Inspired by [Marta](https://marta.sh/) file manager
 -   Built with SwiftUI and native macOS technologies
 -   Icons from SF Symbols
 

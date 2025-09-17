@@ -27,24 +27,20 @@ jobs:
                     -derivedDataPath build \
                     clean build
 
-            - name: Run Tests
+            - name: Build for Release
               run: |
                   xcodebuild -project Folderium.xcodeproj \
                     -scheme Folderium \
-                    -configuration Debug \
+                    -configuration Release \
                     -derivedDataPath build \
-                    test
+                    clean build
 
-            - name: Create DMG
-              run: |
-                  ./scripts/build_dmg.sh
-
-            - name: Upload Artifacts
+            - name: Upload Build Artifacts
               uses: actions/upload-artifact@v4
               with:
-                  name: Folderium-DMG
-                  path: Folderium-*.dmg
-                  retention-days: 30
+                  name: Folderium-Build
+                  path: build/Build/Products/Debug/Folderium.app
+                  retention-days: 7
 
     test:
         runs-on: macos-latest
@@ -52,9 +48,16 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
-            - name: Run Verification Script
+            - name: Select Xcode
+              run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+            - name: Run Tests
               run: |
-                  ./scripts/verify_build.sh
+                  xcodebuild -project Folderium.xcodeproj \
+                    -scheme Folderium \
+                    -configuration Debug \
+                    -derivedDataPath build \
+                    test
 
             - name: Check Code Style
               run: |
