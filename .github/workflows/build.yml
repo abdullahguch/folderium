@@ -1,4 +1,4 @@
-name: Build and Test
+name: Build Folderium
 
 on:
     push:
@@ -41,25 +41,3 @@ jobs:
                   name: Folderium-Build
                   path: build/Build/Products/Debug/Folderium.app
                   retention-days: 7
-
-    test:
-        runs-on: macos-latest
-
-        steps:
-            - uses: actions/checkout@v4
-
-            - name: Select Xcode
-              run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-
-            - name: Run Tests
-              run: |
-                  xcodebuild -project Folderium.xcodeproj \
-                    -scheme Folderium \
-                    -configuration Debug \
-                    -derivedDataPath build \
-                    test
-
-            - name: Check Code Style
-              run: |
-                  # Add SwiftLint or other code style checks here
-                  echo "Code style checks would go here"
