@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Folderium - Modern File Manager for macOS</title>
+		<meta
+			name="description"
+			content="A native macOS file manager with dual-pane layout, built with Swift and SwiftUI. Inspired by Marta but open-source." />
+		<link rel="icon" type="image/svg+xml" href="folderium-logo.svg" />
+		<link rel="alternate icon" href="folderium-logo.svg" />
+		<script src="https://cdn.tailwindcss.com"></script>
+		<script>
+			tailwind.config = {
+				theme: {
+					extend: {
+						colors: {
+							"folderium-blue": "#007AFF",
+							"folderium-gray": "#1C1C1E",
+							"folderium-light-gray": "#F2F2F7",
+						},
+					},
+				},
+			};
+		</script>
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+	</head>
+	<body class="bg-white text-gray-900">
+		<!-- Navigation -->
+		<nav class="bg-white shadow-lg fixed w-full top-0 z-50">
+			<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+				<div class="flex justify-between items-center h-16">
+					<div class="flex items-center">
+						<div class="flex-shrink-0 flex items-center">
+							<img src="folderium-logo.svg" alt="Folderium Logo" class="w-8 h-8 mr-3" />
+							<span class="text-xl font-bold text-gray-900">Folderium</span>
+						</div>
+					</div>
+					<div class="hidden md:block">
+						<div class="ml-10 flex items-baseline space-x-4">
+							<a
+								href="#features"
+								class="text-gray-600 hover:text-folderium-blue px-3 py-2 rounded-md text-sm font-medium transition-colors"
+								>Features</a
+							>
+							<a
+								href="#download"
+								class="text-gray-600 hover:text-folderium-blue px-3 py-2 rounded-md text-sm font-medium transition-colors"
+								>Download</a
+							>
+							<a
+								href="#github"
+								class="text-gray-600 hover:text-folderium-blue px-3 py-2 rounded-md text-sm font-medium transition-colors"
+								>GitHub</a
+							>
+						</div>
+					</div>
+					<div class="md:hidden">
+						<button
+							class="text-gray-600 hover:text-folderium-blue focus:outline-none focus:text-folderium-blue">
+							<i class="fas fa-bars text-xl"></i>
+						</button>
+					</div>
+				</div>
+			</div>
+		</nav>
+
+		<!-- Hero Section -->
+		<section class="pt-20 pb-16 bg-gradient-to-br from-folderium-light-gray to-white">
+			<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+				<div class="text-center">
+					<div class="flex justify-center mb-8">
+						<div class="rounded-full shadow-2xl">
+							<img src="folderium-logo.svg" alt="Folderium Logo" class="w-24 h-24" />
+						</div>
+					</div>
+					<h1 class="text-4xl md:text-6xl font-bold text-gray-900 mb-6">Folderium</h1>
+					<p class="text-xl md:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto">
+						A native macOS file manager with dual-pane layout, inspired by Marta but open-source. Built
+						entirely with Swift and SwiftUI.
+					</p>
+					<div class="flex flex-col sm:flex-row gap-4 justify-center">
+						<a
+							href="#github"
+							class="bg-folderium-blue text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-blue-600 transition-colors shadow-lg">
+							<i class="fab fa-github mr-2"></i>
+							View on GitHub
+						</a>
+						<a
+							href="#download"
+							class="bg-white text-folderium-blue border-2 border-folderium-blue px-8 py-4 rounded-lg font-semibold text-lg hover:bg-folderium-blue hover:text-white transition-colors shadow-lg">
+							<i class="fas fa-download mr-2"></i>
+							Download
+						</a>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Features Section -->
+		<section id="features" class="py-20 bg-white">
+			<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+				<div class="text-center mb-16">
+					<h2 class="text-3xl md:text-4xl font-bold text-gray-900 mb-4">Powerful Features</h2>
+					<p class="text-xl text-gray-600 max-w-2xl mx-auto">
+						Everything you need for efficient file management on macOS
+					</p>
+				</div>
+
+				<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+					<!-- Dual-Pane Interface -->
+					<div class="bg-folderium-light-gray rounded-xl p-8 hover:shadow-lg transition-shadow">
+						<div class="bg-folderium-blue rounded-lg w-16 h-16 flex items-center justify-center mb-6">
+							<i class="fas fa-columns text-white text-2xl"></i>
+						</div>
+						<h3 class="text-xl font-bold text-gray-900 mb-4">Dual-Pane Interface</h3>
+						<p class="text-gray-600">
+							Two-pane layout for efficient file management with resizable panes and active pane
+							highlighting.
+						</p>
+					</div>
+
+					<!-- Advanced Search -->
+					<div class="bg-folderium-light-gray rounded-xl p-8 hover:shadow-lg transition-shadow">
+						<div class="bg-folderium-blue rounded-lg w-16 h-16 flex items-center justify-center mb-6">
+							<i class="fas fa-search text-white text-2xl"></i>
+						</div>
+						<h3 class="text-xl font-bold text-gray-900 mb-4">Advanced Search</h3>
+						<p class="text-gray-600">
+							Real-time filtering, per-pane search, and system-wide Spotlight integration with regex
+							support.
+						</p>
+					</div>
+
+					<!-- File Operations -->
+					<div class="bg-folderium-light-gray rounded-xl p-8 hover:shadow-lg transition-shadow">
+						<div class="bg-folderium-blue rounded-lg w-16 h-16 flex items-center justify-center mb-6">
+							<i class="fas fa-copy text-white text-2xl"></i>
+						</div>
+						<h3 class="text-xl font-bold text-gray-900 mb-4">File Operations</h3>
+						<p class="text-gray-600">
+							Copy, cut, paste, rename, delete with drag & drop support and conflict resolution.
+						</p>
+					</div>
+
+					<!-- Archive Support -->
+					<div class="bg-folderium-light-gray rounded-xl p-8 hover:shadow-lg transition-shadow">
+						<div class="bg-folderium-blue rounded-lg w-16 h-16 flex items-center justify-center mb-6">
+							<i class="fas fa-file-archive text-white text-2xl"></i>
+						</div>
+						<h3 class="text-xl font-bold text-gray-900 mb-4">Archive Support</h3>
+						<p class="text-gray-600">
+							Compress and extract from ZIP, RAR, 7Z, TAR, GZIP, BZIP2, XZ, CAB, ISO, and more.
+						</p>
+					</div>
+
+					<!-- Terminal Integration -->
+					<div class="bg-folderium-light-gray rounded-xl p-8 hover:shadow-lg transition-shadow">
+						<div class="bg-folderium-blue rounded-lg w-16 h-16 flex items-center justify-center mb-6">
+							<i class="fas fa-terminal text-white text-2xl"></i>
+						</div>
+						<h3 class="text-xl font-bold text-gray-900 mb-4">Terminal Integration</h3>
+						<p class="text-gray-600">
+							Embedded terminal with two-way directory sync and full command history support.
+						</p>
+					</div>
+
+					<!-- Cloud Storage -->
+					<div class="bg-folderium-light-gray rounded-xl p-8 hover:shadow-lg transition-shadow">
+						<div class="bg-folderium-blue rounded-lg w-16 h-16 flex items-center justify-center mb-6">
+							<i class="fas fa-cloud text-white text-2xl"></i>
+						</div>
+						<h3 class="text-xl font-bold text-gray-900 mb-4">Cloud Storage</h3>
+						<p class="text-gray-600">
+							OneDrive, Dropbox, Google Drive, iCloud integration with symbolic link resolution.
+						</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Screenshots Section -->
+		<section class="py-20 bg-folderium-light-gray">
+			<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+				<div class="text-center mb-16">
+					<h2 class="text-3xl md:text-4xl font-bold text-gray-900 mb-4">See Folderium in Action</h2>
+					<p class="text-xl text-gray-600 max-w-2xl mx-auto">
+						Experience the modern, intuitive interface designed for macOS
+					</p>
+				</div>
+
+				<div class="bg-white rounded-2xl shadow-2xl p-8 max-w-6xl mx-auto">
+					<div class="bg-gray-100 rounded-lg p-8 text-center">
+						<i class="fas fa-image text-gray-400 text-6xl mb-4"></i>
+						<p class="text-gray-600 text-lg">Screenshot placeholder - Add your app screenshots here</p>
+						<p class="text-sm text-gray-500 mt-2">Recommended: 1200x800px or similar aspect ratio</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Download Section -->
+		<section id="download" class="py-20 bg-white">
+			<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+				<div class="text-center">
+					<h2 class="text-3xl md:text-4xl font-bold text-gray-900 mb-4">Download Folderium</h2>
+					<p class="text-xl text-gray-600 mb-12 max-w-2xl mx-auto">
+						Get the latest version of Folderium for macOS
+					</p>
+
+					<div class="bg-folderium-light-gray rounded-2xl p-8 max-w-2xl mx-auto">
+						<div class="flex items-center justify-center mb-6">
+							<i class="fas fa-apple text-gray-600 text-4xl mr-4"></i>
+							<div>
+								<h3 class="text-2xl font-bold text-gray-900">macOS</h3>
+								<p class="text-gray-600">Version 1.0.0</p>
+							</div>
+						</div>
+
+						<div class="space-y-4">
+							<a
+								href="#github"
+								class="w-full bg-folderium-blue text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-blue-600 transition-colors shadow-lg flex items-center justify-center">
+								<i class="fas fa-download mr-2"></i>
+								Download DMG
+							</a>
+							<a
+								href="#github"
+								class="w-full bg-white text-folderium-blue border-2 border-folderium-blue px-8 py-4 rounded-lg font-semibold text-lg hover:bg-folderium-blue hover:text-white transition-colors shadow-lg flex items-center justify-center">
+								<i class="fab fa-github mr-2"></i>
+								Build from Source
+							</a>
+						</div>
+
+						<div class="mt-6 text-sm text-gray-500">
+							<p>Requires macOS 14.0 or later</p>
+							<p>Built with Swift and SwiftUI</p>
+						</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- GitHub Section -->
+		<section id="github" class="py-20 bg-folderium-gray text-white">
+			<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+				<div class="text-center">
+					<h2 class="text-3xl md:text-4xl font-bold mb-4">Open Source & Community</h2>
+					<p class="text-xl text-gray-300 mb-12 max-w-2xl mx-auto">
+						Folderium is open source and built by the community, for the community.
+					</p>
+
+					<div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+						<div class="text-center">
+							<i class="fab fa-github text-4xl text-folderium-blue mb-4"></i>
+							<h3 class="text-xl font-bold mb-2">Open Source</h3>
+							<p class="text-gray-300">MIT licensed and available on GitHub</p>
+						</div>
+						<div class="text-center">
+							<i class="fas fa-users text-4xl text-folderium-blue mb-4"></i>
+							<h3 class="text-xl font-bold mb-2">Community Driven</h3>
+							<p class="text-gray-300">Contributions and feedback welcome</p>
+						</div>
+						<div class="text-center">
+							<i class="fas fa-code text-4xl text-folderium-blue mb-4"></i>
+							<h3 class="text-xl font-bold mb-2">Modern Tech</h3>
+							<p class="text-gray-300">Built with Swift and SwiftUI</p>
+						</div>
+					</div>
+
+					<div class="flex flex-col sm:flex-row gap-4 justify-center">
+						<a
+							href="https://github.com/abdullahguch/folderium"
+							class="bg-folderium-blue text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-blue-600 transition-colors shadow-lg flex items-center justify-center">
+							<i class="fab fa-github mr-2"></i>
+							View Source Code
+						</a>
+						<a
+							href="https://github.com/abdullahguch/folderium/issues"
+							class="bg-white text-folderium-gray px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-100 transition-colors shadow-lg flex items-center justify-center">
+							<i class="fas fa-bug mr-2"></i>
+							Report Issues
+						</a>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Footer -->
+		<footer class="bg-gray-900 text-white py-12">
+			<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+				<div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+					<div>
+						<div class="flex items-center mb-4">
+							<img src="folderium-logo.svg" alt="Folderium Logo" class="w-8 h-8 mr-3" />
+							<span class="text-xl font-bold">Folderium</span>
+						</div>
+						<p class="text-gray-400">
+							A modern file manager for macOS, built with ❤️ using Swift and SwiftUI.
+						</p>
+					</div>
+
+					<div>
+						<h3 class="text-lg font-semibold mb-4">Product</h3>
+						<ul class="space-y-2 text-gray-400">
+							<li><a href="#features" class="hover:text-white transition-colors">Features</a></li>
+							<li><a href="#download" class="hover:text-white transition-colors">Download</a></li>
+							<li><a href="#github" class="hover:text-white transition-colors">GitHub</a></li>
+						</ul>
+					</div>
+
+					<div>
+						<h3 class="text-lg font-semibold mb-4">Community</h3>
+						<ul class="space-y-2 text-gray-400">
+							<li>
+								<a
+									href="https://github.com/abdullahguch/folderium"
+									class="hover:text-white transition-colors"
+									>GitHub</a
+								>
+							</li>
+							<li>
+								<a
+									href="https://github.com/abdullahguch/folderium/issues"
+									class="hover:text-white transition-colors"
+									>Issues</a
+								>
+							</li>
+							<li>
+								<a
+									href="https://github.com/abdullahguch/folderium/discussions"
+									class="hover:text-white transition-colors"
+									>Discussions</a
+								>
+							</li>
+						</ul>
+					</div>
+
+					<div>
+						<h3 class="text-lg font-semibold mb-4">Legal</h3>
+						<ul class="space-y-2 text-gray-400">
+							<li>
+								<a
+									href="https://github.com/abdullahguch/folderium/blob/main/LICENSE"
+									class="hover:text-white transition-colors"
+									>License</a
+								>
+							</li>
+							<li>
+								<a
+									href="https://github.com/abdullahguch/folderium/blob/main/CONTRIBUTING.md"
+									class="hover:text-white transition-colors"
+									>Contributing</a
+								>
+							</li>
+							<li>
+								<a
+									href="https://github.com/abdullahguch/folderium/blob/main/README.md"
+									class="hover:text-white transition-colors"
+									>Documentation</a
+								>
+							</li>
+						</ul>
+					</div>
+				</div>
+
+				<div class="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
+					<p>&copy; 2024 Folderium. All rights reserved. Made with ❤️ for the macOS community.</p>
+				</div>
+			</div>
+		</footer>
+
+		<!-- Smooth scrolling script -->
+		<script>
+			// Smooth scrolling for navigation links
+			document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
+				anchor.addEventListener("click", function (e) {
+					e.preventDefault();
+					const target = document.querySelector(this.getAttribute("href"));
+					if (target) {
+						target.scrollIntoView({
+							behavior: "smooth",
+							block: "start",
+						});
+					}
+				});
+			});
+
+			// Add scroll effect to navigation
+			window.addEventListener("scroll", function () {
+				const nav = document.querySelector("nav");
+				if (window.scrollY > 100) {
+					nav.classList.add("bg-opacity-95", "backdrop-blur-sm");
+				} else {
+					nav.classList.remove("bg-opacity-95", "backdrop-blur-sm");
+				}
+			});
+		</script>
+	</body>
+</html>
