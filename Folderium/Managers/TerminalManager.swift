@@ -3,15 +3,13 @@ import AppKit
 import SwiftUI
 
 class TerminalManager: ObservableObject {
-    static let shared = TerminalManager()
-    
     @Published var isTerminalOpen: Bool = false
     @Published var currentDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     
     private var terminalProcess: Process?
     private var terminalWindow: NSWindow?
     
-    private init() {}
+    init() {}
     
     // MARK: - Terminal Operations
     
@@ -67,7 +65,7 @@ class TerminalManager: ObservableObject {
     
     func openBuiltInTerminal(directory: URL) {
         // Create a new window with a terminal view
-        let terminalView = TerminalView(directory: directory)
+        let terminalView = TerminalView(directory: directory, terminalManager: self)
         let hostingView = NSHostingView(rootView: terminalView)
         
         let window = NSWindow(
@@ -157,6 +155,7 @@ class TerminalManager: ObservableObject {
 
 struct TerminalView: View {
     let directory: URL
+    let terminalManager: TerminalManager
     @State private var command: String = ""
     @State private var output: String = ""
     @State private var isExecuting: Bool = false
@@ -246,7 +245,7 @@ struct TerminalView: View {
         
         Task {
             do {
-                let result = try await TerminalManager.shared.executeCommand(commandToExecute, in: directory)
+                let result = try await terminalManager.executeCommand(commandToExecute, in: directory)
                 
                 await MainActor.run {
                     if !result.output.isEmpty {

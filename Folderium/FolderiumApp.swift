@@ -13,7 +13,7 @@ struct FolderiumApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Window") {
-                    AppDelegate.shared.openNewWindow()
+                    appDelegate.openNewWindow()
                 }
                 .keyboardShortcut("n", modifiers: [.command])
             }
@@ -26,11 +26,6 @@ struct FolderiumApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    static let shared = AppDelegate()
-    
-    private override init() {
-        super.init()
-    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Set activation policy to regular
