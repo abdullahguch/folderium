@@ -1,0 +1,62 @@
+name: Build and Test
+
+on:
+    push:
+        branches: [main, develop]
+    pull_request:
+        branches: [main]
+
+jobs:
+    build:
+        runs-on: macos-latest
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Select Xcode
+              run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+            - name: Verify Xcode
+              run: xcodebuild -version
+
+            - name: Build Project
+              run: |
+                  xcodebuild -project Folderium.xcodeproj \
+                    -scheme Folderium \
+                    -configuration Debug \
+                    -derivedDataPath build \
+                    clean build
+
+            - name: Run Tests
+              run: |
+                  xcodebuild -project Folderium.xcodeproj \
+                    -scheme Folderium \
+                    -configuration Debug \
+                    -derivedDataPath build \
+                    test
+
+            - name: Create DMG
+              run: |
+                  ./scripts/build_dmg.sh
+
+            - name: Upload Artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: Folderium-DMG
+                  path: Folderium-*.dmg
+                  retention-days: 30
+
+    test:
+        runs-on: macos-latest
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Run Verification Script
+              run: |
+                  ./scripts/verify_build.sh
+
+            - name: Check Code Style
+              run: |
+                  # Add SwiftLint or other code style checks here
+                  echo "Code style checks would go here"

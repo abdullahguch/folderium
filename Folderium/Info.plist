@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIconFile</key>
+    <string></string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2024 Folderium. All rights reserved.</string>
+    <key>NSMainNibFile</key>
+    <string>MainMenu</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSSupportsAutomaticTermination</key>
+    <true/>
+    <key>NSSupportsSuddenTermination</key>
+    <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Folder</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.folder</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Archive</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.archive</string>
+                <string>public.zip-archive</string>
+                <string>public.tar-archive</string>
+                <string>public.gzip-archive</string>
+                <string>public.bzip2-archive</string>
+            </array>
+        </dict>
+    </array>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Folderium needs access to Apple Events to open Terminal and other applications.</string>
+    <key>NSSystemAdministrationUsageDescription</key>
+    <string>Folderium needs system administration access to manage files and archives.</string>
+</dict>
+</plist>
