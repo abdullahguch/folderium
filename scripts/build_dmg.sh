@@ -34,7 +34,7 @@ mkdir -p "$DMG_TEMP_DIR"
 
 # Build the app
 echo -e "${YELLOW}🔨 Building Xcode project...${NC}"
-xcodebuild -project Folderium.xcodeproj \
+/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project Folderium.xcodeproj \
     -scheme Folderium \
     -configuration Release \
     -derivedDataPath "$BUILD_DIR" \

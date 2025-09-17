@@ -57,6 +57,7 @@
 					</div>
 					<div class="md:hidden">
 						<button
+							id="mobile-menu-button"
 							class="text-gray-600 hover:text-folderium-blue focus:outline-none focus:text-folderium-blue">
 							<i class="fas fa-bars text-xl"></i>
 						</button>
@@ -64,6 +65,27 @@
 				</div>
 			</div>
 		</nav>
+
+		<!-- Mobile Menu -->
+		<div id="mobile-menu" class="md:hidden hidden bg-white shadow-lg">
+			<div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+				<a
+					href="#features"
+					class="text-gray-600 hover:text-folderium-blue block px-3 py-2 rounded-md text-base font-medium transition-colors"
+					>Features</a
+				>
+				<a
+					href="#download"
+					class="text-gray-600 hover:text-folderium-blue block px-3 py-2 rounded-md text-base font-medium transition-colors"
+					>Download</a
+				>
+				<a
+					href="https://github.com/abdullahguch/folderium"
+					class="text-gray-600 hover:text-folderium-blue block px-3 py-2 rounded-md text-base font-medium transition-colors"
+					>GitHub</a
+				>
+			</div>
+		</div>
 
 		<!-- Hero Section -->
 		<section class="pt-20 pb-16 bg-gradient-to-br from-folderium-light-gray to-white">
@@ -81,13 +103,13 @@
 					</p>
 					<div class="flex flex-col sm:flex-row gap-4 justify-center">
 						<a
-							href="#github"
+							href="https://github.com/abdullahguch/folderium"
 							class="bg-folderium-blue text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-blue-600 transition-colors shadow-lg">
 							<i class="fab fa-github mr-2"></i>
 							View on GitHub
 						</a>
 						<a
-							href="#download"
+							href="Folderium-1.0.0.dmg"
 							class="bg-white text-folderium-blue border-2 border-folderium-blue px-8 py-4 rounded-lg font-semibold text-lg hover:bg-folderium-blue hover:text-white transition-colors shadow-lg">
 							<i class="fas fa-download mr-2"></i>
 							Download
@@ -217,13 +239,13 @@
 
 						<div class="space-y-4">
 							<a
-								href="#github"
+								href="Folderium-1.0.0.dmg"
 								class="w-full bg-folderium-blue text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-blue-600 transition-colors shadow-lg flex items-center justify-center">
 								<i class="fas fa-download mr-2"></i>
 								Download DMG
 							</a>
 							<a
-								href="#github"
+								href="https://github.com/abdullahguch/folderium"
 								class="w-full bg-white text-folderium-blue border-2 border-folderium-blue px-8 py-4 rounded-lg font-semibold text-lg hover:bg-folderium-blue hover:text-white transition-colors shadow-lg flex items-center justify-center">
 								<i class="fab fa-github mr-2"></i>
 								Build from Source
@@ -363,6 +385,36 @@
 
 		<!-- Smooth scrolling script -->
 		<script>
+			// Mobile menu toggle
+			document.addEventListener("DOMContentLoaded", function () {
+				const mobileMenuButton = document.getElementById("mobile-menu-button");
+				const mobileMenu = document.getElementById("mobile-menu");
+
+				if (mobileMenuButton && mobileMenu) {
+					mobileMenuButton.addEventListener("click", function () {
+						mobileMenu.classList.toggle("hidden");
+
+						// Toggle hamburger icon
+						const icon = mobileMenuButton.querySelector("i");
+						if (mobileMenu.classList.contains("hidden")) {
+							icon.className = "fas fa-bars text-xl";
+						} else {
+							icon.className = "fas fa-times text-xl";
+						}
+					});
+
+					// Close mobile menu when clicking on a link
+					const mobileMenuLinks = mobileMenu.querySelectorAll("a");
+					mobileMenuLinks.forEach((link) => {
+						link.addEventListener("click", function () {
+							mobileMenu.classList.add("hidden");
+							const icon = mobileMenuButton.querySelector("i");
+							icon.className = "fas fa-bars text-xl";
+						});
+					});
+				}
+			});
+
 			// Smooth scrolling for navigation links
 			document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
 				anchor.addEventListener("click", function (e) {
