@@ -2,7 +2,7 @@
 
 A native macOS file manager with dual-pane layout, inspired by Marta (but open-source). Built entirely in Swift and SwiftUI.
 
-![Folderium Screenshot](https://via.placeholder.com/800x500/1e1e1e/ffffff?text=Folderium+File+Manager)
+![Folderium Screenshot](https://folderium.com/screenshot.png)
 
 ## Features
 
