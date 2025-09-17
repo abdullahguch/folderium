@@ -9,7 +9,8 @@ struct FolderiumApp: App {
             ContentView()
         }
         .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 1400, height: 900)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Window") {
@@ -30,6 +31,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Set activation policy to regular
         NSApp.setActivationPolicy(.regular)
+        
+        // Maximize the initial window to screen size
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.maximizeInitialWindow()
+        }
+    }
+    
+    private func maximizeInitialWindow() {
+        guard let window = NSApp.windows.first else { return }
+        guard let screen = NSScreen.main else { return }
+        
+        let screenFrame = screen.visibleFrame
+        window.setFrame(screenFrame, display: true, animate: true)
     }
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -41,9 +55,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func openNewWindow() {
-        // Create a new window using NSWindow
+        // Get the screen size for full-screen window
+        guard let screen = NSScreen.main else { return }
+        let screenFrame = screen.visibleFrame
+        
+        // Create a new window using NSWindow with screen size
         let newWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+            contentRect: screenFrame,
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -52,7 +70,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let contentView = ContentView()
         newWindow.contentView = NSHostingView(rootView: contentView)
         newWindow.title = "Folderium"
-        newWindow.center()
+        newWindow.setFrame(screenFrame, display: true)
         newWindow.isReleasedWhenClosed = true
         
         // Show the window

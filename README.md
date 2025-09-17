@@ -202,6 +202,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 -   Inspired by [Marta](https://marta.sh/) file manager
 -   Built with SwiftUI and native macOS technologies
 -   Icons from SF Symbols
+-   App icon from (https://www.svgrepo.com/svg/514322/folder)
 
 ## Support
 

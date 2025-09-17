@@ -4,7 +4,7 @@ import SwiftUI
 
 class TerminalManager: ObservableObject {
     @Published var isTerminalOpen: Bool = false
-    @Published var currentDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    @Published var currentDirectory: URL = URL(fileURLWithPath: "/Users/\(NSUserName())")
     
     private var terminalProcess: Process?
     private var terminalWindow: NSWindow?
@@ -310,7 +310,7 @@ extension Notification.Name {
 
 class TerminalIntegration: ObservableObject {
     @Published var isIntegrated: Bool = false
-    @Published var currentDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    @Published var currentDirectory: URL = URL(fileURLWithPath: "/Users/\(NSUserName())")
     
     private var fileWatcher: FileWatcher?
     

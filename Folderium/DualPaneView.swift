@@ -21,8 +21,8 @@ struct DraggableModifier: ViewModifier {
 
 
 struct DualPaneView: View {
-    @State private var leftPath: URL = FileManager.default.homeDirectoryForCurrentUser
-    @State private var rightPath: URL = FileManager.default.homeDirectoryForCurrentUser
+    @State private var leftPath: URL = URL(fileURLWithPath: "/Users/\(NSUserName())")
+    @State private var rightPath: URL = URL(fileURLWithPath: "/Users/\(NSUserName())")
     @State private var leftSelection: Set<URL> = []
     @State private var rightSelection: Set<URL> = []
     @State private var leftSearchText: String = ""
@@ -1255,7 +1255,7 @@ class FileTab: ObservableObject, Identifiable, Equatable {
     @Published var leftPath: URL
     @Published var rightPath: URL
     
-    init(name: String = "New Tab", leftPath: URL = FileManager.default.homeDirectoryForCurrentUser, rightPath: URL = FileManager.default.homeDirectoryForCurrentUser) {
+    init(name: String = "New Tab", leftPath: URL = URL(fileURLWithPath: "/Users/\(NSUserName())"), rightPath: URL = URL(fileURLWithPath: "/Users/\(NSUserName())")) {
         self.name = name
         self.leftPath = leftPath
         self.rightPath = rightPath
