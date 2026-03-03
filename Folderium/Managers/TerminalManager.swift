@@ -4,7 +4,7 @@ import SwiftUI
 
 class TerminalManager: ObservableObject {
     @Published var isTerminalOpen: Bool = false
-    @Published var currentDirectory: URL = URL(fileURLWithPath: "/Users/\(NSUserName())")
+    @Published var currentDirectory: URL = SandboxAccessManager.defaultDirectory
     
     private var terminalProcess: Process?
     private var terminalWindow: NSWindow?
@@ -16,51 +16,7 @@ class TerminalManager: ObservableObject {
     func openTerminal(at directory: URL) {
         currentDirectory = directory
         isTerminalOpen = true
-        
-        // Try to open Terminal.app with the specified directory
-        openInTerminalApp(directory: directory)
-    }
-    
-    func openInTerminalApp(directory: URL) {
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "cd '\(directory.path)'"
-        end tell
-        """
-        
-        let appleScript = NSAppleScript(source: script)
-        var error: NSDictionary?
-        appleScript?.executeAndReturnError(&error)
-        
-        if let error = error {
-            print("Error opening Terminal: \(error)")
-            // Fallback to iTerm2 if available
-            openInITerm2(directory: directory)
-        }
-    }
-    
-    func openInITerm2(directory: URL) {
-        let script = """
-        tell application "iTerm"
-            activate
-            tell current window
-                tell current session
-                    write text "cd '\(directory.path)'"
-                end tell
-            end tell
-        end tell
-        """
-        
-        let appleScript = NSAppleScript(source: script)
-        var error: NSDictionary?
-        appleScript?.executeAndReturnError(&error)
-        
-        if let error = error {
-            print("Error opening iTerm2: \(error)")
-            // Fallback to built-in terminal
-            openBuiltInTerminal(directory: directory)
-        }
+        openBuiltInTerminal(directory: directory)
     }
     
     func openBuiltInTerminal(directory: URL) {
@@ -310,7 +266,7 @@ extension Notification.Name {
 
 class TerminalIntegration: ObservableObject {
     @Published var isIntegrated: Bool = false
-    @Published var currentDirectory: URL = URL(fileURLWithPath: "/Users/\(NSUserName())")
+    @Published var currentDirectory: URL = SandboxAccessManager.defaultDirectory
     
     private var fileWatcher: FileWatcher?
     

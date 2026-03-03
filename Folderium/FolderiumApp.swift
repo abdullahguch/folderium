@@ -80,17 +80,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 struct SettingsView: View {
+    @AppStorage("folderium.windowsFamiliarMode") private var windowsFamiliarMode: Bool = true
+    
     var body: some View {
-        VStack {
+        VStack(alignment: .leading, spacing: 16) {
             Text("Folderium Settings")
                 .font(.title)
-                .padding()
             
             Text("Privacy-focused file manager for macOS")
                 .foregroundColor(.secondary)
             
+            Toggle("Windows Familiar Mode", isOn: $windowsFamiliarMode)
+            
+            Text("When enabled, Folderium prioritizes File Explorer-like labels and interactions.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
             Spacer()
         }
+        .padding()
         .frame(width: 400, height: 300)
     }
 }

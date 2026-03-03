@@ -4,6 +4,13 @@ enum ActivePane {
     case left, right
 }
 
+struct QuickLocation: Identifiable {
+    let id = UUID()
+    let name: String
+    let icon: String
+    let url: URL
+}
+
 struct DraggableModifier: ViewModifier {
     let selection: Set<URL>
     let dragPreview: () -> AnyView
@@ -21,8 +28,14 @@ struct DraggableModifier: ViewModifier {
 
 
 struct DualPaneView: View {
-    @State private var leftPath: URL = URL(fileURLWithPath: "/Users/\(NSUserName())")
-    @State private var rightPath: URL = URL(fileURLWithPath: "/Users/\(NSUserName())")
+    private let defaultQuickAccessWidth: CGFloat = 220
+    private let defaultPaneSplitRatio: CGFloat = 0.5
+    private let defaultTerminalHeight: CGFloat = 200
+    @AppStorage("folderium.windowsFamiliarMode") private var windowsFamiliarMode: Bool = true
+    @AppStorage("folderium.showWindowsOnboarding") private var showWindowsOnboarding: Bool = true
+    @AppStorage("folderium.pinnedPaths") private var pinnedPathsRaw: String = ""
+    @State private var leftPath: URL = SandboxAccessManager.defaultDirectory
+    @State private var rightPath: URL = SandboxAccessManager.defaultDirectory
     @State private var leftSelection: Set<URL> = []
     @State private var rightSelection: Set<URL> = []
     @State private var leftSearchText: String = ""
@@ -37,41 +50,127 @@ struct DualPaneView: View {
     @State private var activePane: ActivePane = .left // Track which pane is currently active
     @State private var clipboardCheckTrigger: UUID = UUID() // To check clipboard state
     @State private var isCutOperation: Bool = false // Track if last operation was cut
+    @State private var leftBackHistory: [URL] = []
+    @State private var leftForwardHistory: [URL] = []
+    @State private var rightBackHistory: [URL] = []
+    @State private var rightForwardHistory: [URL] = []
+    @State private var isNavigatingLeftHistory: Bool = false
+    @State private var isNavigatingRightHistory: Bool = false
+    @State private var quickAccessWidth: CGFloat = 220
+    @State private var paneSplitRatio: CGFloat = 0.5
+    @State private var leftTerminalHeight: CGFloat = 200
+    @State private var rightTerminalHeight: CGFloat = 200
+    @State private var sidebarDragStartWidth: CGFloat?
+    @State private var paneSplitDragStartLeftWidth: CGFloat?
+    @State private var leftTerminalDragStartHeight: CGFloat?
+    @State private var rightTerminalDragStartHeight: CGFloat?
     
     // Callback to notify parent of selection changes
     var onSelectionChange: ((Set<URL>) -> Void)?
     
+    private var quickLocations: [QuickLocation] {
+        let fileManager = FileManager.default
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        
+        func firstURL(_ directory: FileManager.SearchPathDirectory) -> URL {
+            fileManager.urls(for: directory, in: .userDomainMask).first ?? home
+        }
+        
+        return [
+            QuickLocation(name: "Home", icon: "house", url: home),
+            QuickLocation(name: "Desktop", icon: "desktopcomputer", url: firstURL(.desktopDirectory)),
+            QuickLocation(name: "Documents", icon: "doc.text", url: firstURL(.documentDirectory)),
+            QuickLocation(name: "Downloads", icon: "arrow.down.circle", url: firstURL(.downloadsDirectory)),
+            QuickLocation(name: "Pictures", icon: "photo", url: firstURL(.picturesDirectory)),
+            QuickLocation(name: "Music", icon: "music.note", url: firstURL(.musicDirectory)),
+            QuickLocation(name: "Movies", icon: "film", url: firstURL(.moviesDirectory))
+        ]
+    }
+    
+    private var mountedVolumes: [QuickLocation] {
+        let volumeURLs = FileManager.default.mountedVolumeURLs(
+            includingResourceValuesForKeys: [.volumeNameKey],
+            options: [.skipHiddenVolumes]
+        ) ?? []
+        
+        return volumeURLs.map { url in
+            let name = (try? url.resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? url.lastPathComponent
+            return QuickLocation(name: name, icon: "externaldrive", url: url)
+        }
+    }
+    
+    private var recentLocations: [QuickLocation] {
+        let merged = (leftBackHistory + rightBackHistory + leftForwardHistory + rightForwardHistory).reversed()
+        var seen = Set<String>()
+        var result: [QuickLocation] = []
+        
+        for url in merged {
+            if seen.contains(url.path) { continue }
+            seen.insert(url.path)
+            result.append(QuickLocation(name: url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent, icon: "clock.arrow.circlepath", url: url))
+            if result.count >= 6 { break }
+        }
+        
+        return result
+    }
+    
+    private var pinnedLocations: [QuickLocation] {
+        pinnedPathsRaw
+            .split(separator: "\n")
+            .map(String.init)
+            .compactMap { path in
+                guard !path.isEmpty else { return nil }
+                return QuickLocation(
+                    name: URL(fileURLWithPath: path).lastPathComponent.isEmpty ? path : URL(fileURLWithPath: path).lastPathComponent,
+                    icon: "pin",
+                    url: URL(fileURLWithPath: path)
+                )
+            }
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
-            // Toolbar
-            HStack {
-                Button("Copy Selected") {
-                    copySelectedFiles()
+            if windowsFamiliarMode && showWindowsOnboarding {
+                HStack {
+                    Image(systemName: "lightbulb")
+                        .foregroundColor(.yellow)
+                    Text("Windows Familiar Mode is on: use F2 to rename, Back/Forward/Up to navigate, and Explorer-style context menus.")
+                        .font(.caption)
+                    Spacer()
+                    Button("Dismiss") {
+                        showWindowsOnboarding = false
+                    }
+                    .buttonStyle(.borderless)
                 }
-                .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.accentColor.opacity(0.12))
                 
-                Button("Cut Selected") {
-                    cutSelectedFiles()
-                }
-                .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                Divider()
+            }
+            
+            HStack(spacing: 8) {
+                explorerToolbarButton("Open Left", systemImage: "folder.badge.plus") { selectFolder(for: .left) }
+                explorerToolbarButton("Open Right", systemImage: "folder.badge.plus") { selectFolder(for: .right) }
                 
-                Button("Paste") {
-                    pasteFiles()
-                }
-                .disabled(!hasFilesInClipboard())
-                .onChange(of: clipboardCheckTrigger) { _, _ in
-                    // This will trigger a re-evaluation of the button state
-                }
+                Divider().frame(height: 18)
                 
-                Button("Compress Selected") {
-                    compressSelectedFiles()
-                }
-                .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                explorerToolbarButton("Copy", systemImage: "doc.on.doc") { copySelectedFiles() }
+                    .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                explorerToolbarButton("Cut", systemImage: "scissors") { cutSelectedFiles() }
+                    .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                explorerToolbarButton("Paste", systemImage: "doc.on.clipboard") { pasteFiles() }
+                    .disabled(!hasFilesInClipboard())
+                    .onChange(of: clipboardCheckTrigger) { _, _ in }
                 
-                Button("Delete Selected") {
-                    deleteSelectedFiles()
-                }
-                .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                Divider().frame(height: 18)
+                
+                explorerToolbarButton("Rename", systemImage: "pencil") { renameSelectedItem() }
+                    .disabled((activePane == .left ? leftSelection : rightSelection).count != 1)
+                explorerToolbarButton("Delete", systemImage: "trash") { deleteSelectedFiles() }
+                    .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                explorerToolbarButton("Compress", systemImage: "archivebox") { compressSelectedFiles() }
+                    .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
                 
                 Spacer()
             }
@@ -81,9 +180,42 @@ struct DualPaneView: View {
             
             Divider()
             
-            // Dual pane content
-            HStack(spacing: 0) {
-                    // Left pane
+            GeometryReader { geometry in
+                let totalWidth = max(geometry.size.width, 500)
+                let clampedSidebarWidth = min(max(quickAccessWidth, 170), totalWidth * 0.45)
+                let remainingWidth = max(totalWidth - clampedSidebarWidth - 12, 300)
+                let clampedPaneSplit = min(max(paneSplitRatio, 0.2), 0.8)
+                let leftPaneWidth = max((remainingWidth - 6) * clampedPaneSplit, 150)
+                let rightPaneWidth = max((remainingWidth - 6) - leftPaneWidth, 150)
+                
+                HStack(spacing: 0) {
+                    quickAccessSidebar
+                        .frame(width: clampedSidebarWidth)
+                    
+                    Rectangle()
+                        .fill(Color(NSColor.separatorColor))
+                        .frame(width: 6)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 2)
+                                .onChanged { value in
+                                    if sidebarDragStartWidth == nil {
+                                        sidebarDragStartWidth = clampedSidebarWidth
+                                    }
+                                    let base = sidebarDragStartWidth ?? clampedSidebarWidth
+                                    let proposed = base + value.translation.width
+                                    quickAccessWidth = min(max(proposed, 170), totalWidth * 0.45)
+                                }
+                                .onEnded { _ in
+                                    sidebarDragStartWidth = nil
+                                }
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                quickAccessWidth = defaultQuickAccessWidth
+                            }
+                        }
+                    
                     VStack(spacing: 0) {
                         FilePaneView(
                             path: $leftPath,
@@ -96,28 +228,65 @@ struct DualPaneView: View {
                             onRefresh: { refreshTrigger = UUID() },
                             refreshTrigger: refreshTrigger,
                             onBulkCompress: compressSelectedFiles,
-                            onFocus: { 
-                                print("Left pane focus triggered")
-                                activePane = .left 
+                            canNavigateBack: !leftBackHistory.isEmpty,
+                            canNavigateForward: !leftForwardHistory.isEmpty,
+                            onNavigateBack: { navigateBack(in: .left) },
+                            onNavigateForward: { navigateForward(in: .left) },
+                            onNavigateUp: { navigateUp(in: .left) },
+                            onFocus: {
+                                activePane = .left
                             }
                         )
                         .frame(maxWidth: .infinity)
                         .onChange(of: leftSelection) { _, _ in
                             onSelectionChange?(leftSelection)
                         }
-                    
-                    if showLeftTerminal {
-                        RealTerminalView(currentDirectory: leftPath)
-                            .frame(height: 200)
-                            .onTapGesture {
-                                activePane = .left
-                            }
+                        .onChange(of: leftPath) { oldValue, newValue in
+                            recordHistoryIfNeeded(for: .left, oldValue: oldValue, newValue: newValue)
+                        }
+                        
+                        if showLeftTerminal {
+                            terminalResizeHandle(
+                                height: $leftTerminalHeight,
+                                dragStartHeight: $leftTerminalDragStartHeight,
+                                maxHeight: geometry.size.height * 0.7,
+                                defaultHeight: defaultTerminalHeight
+                            )
+                            RealTerminalView(currentDirectory: leftPath)
+                                .frame(height: leftTerminalHeight)
+                                .onTapGesture {
+                                    activePane = .left
+                                }
+                        }
                     }
-                }
-                
-                Divider()
-                
-                    // Right pane
+                    .frame(width: leftPaneWidth)
+                    
+                    Rectangle()
+                        .fill(Color(NSColor.separatorColor))
+                        .frame(width: 6)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 2)
+                                .onChanged { value in
+                                    let usableWidth = max(remainingWidth - 6, 300)
+                                    if paneSplitDragStartLeftWidth == nil {
+                                        paneSplitDragStartLeftWidth = leftPaneWidth
+                                    }
+                                    let base = paneSplitDragStartLeftWidth ?? leftPaneWidth
+                                    let proposedLeft = base + value.translation.width
+                                    let clampedLeft = min(max(proposedLeft, 150), usableWidth - 150)
+                                    paneSplitRatio = clampedLeft / usableWidth
+                                }
+                                .onEnded { _ in
+                                    paneSplitDragStartLeftWidth = nil
+                                }
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                paneSplitRatio = defaultPaneSplitRatio
+                            }
+                        }
+                    
                     VStack(spacing: 0) {
                         FilePaneView(
                             path: $rightPath,
@@ -130,23 +299,38 @@ struct DualPaneView: View {
                             onRefresh: { refreshTrigger = UUID() },
                             refreshTrigger: refreshTrigger,
                             onBulkCompress: compressSelectedFiles,
-                            onFocus: { 
-                                print("Right pane focus triggered")
-                                activePane = .right 
+                            canNavigateBack: !rightBackHistory.isEmpty,
+                            canNavigateForward: !rightForwardHistory.isEmpty,
+                            onNavigateBack: { navigateBack(in: .right) },
+                            onNavigateForward: { navigateForward(in: .right) },
+                            onNavigateUp: { navigateUp(in: .right) },
+                            onFocus: {
+                                activePane = .right
                             }
                         )
                         .frame(maxWidth: .infinity)
                         .onChange(of: rightSelection) { _, _ in
                             onSelectionChange?(rightSelection)
                         }
-                    
-                    if showRightTerminal {
-                        RealTerminalView(currentDirectory: rightPath)
-                            .frame(height: 200)
-                            .onTapGesture {
-                                activePane = .right
-                            }
+                        .onChange(of: rightPath) { oldValue, newValue in
+                            recordHistoryIfNeeded(for: .right, oldValue: oldValue, newValue: newValue)
+                        }
+                        
+                        if showRightTerminal {
+                            terminalResizeHandle(
+                                height: $rightTerminalHeight,
+                                dragStartHeight: $rightTerminalDragStartHeight,
+                                maxHeight: geometry.size.height * 0.7,
+                                defaultHeight: defaultTerminalHeight
+                            )
+                            RealTerminalView(currentDirectory: rightPath)
+                                .frame(height: rightTerminalHeight)
+                                .onTapGesture {
+                                    activePane = .right
+                                }
+                        }
                     }
+                    .frame(width: rightPaneWidth)
                 }
             }
         }
@@ -174,9 +358,360 @@ struct DualPaneView: View {
                 Text("Are you sure you want to permanently delete \(filesToDelete.count) files? This action cannot be undone.")
             }
         }
+        .onAppear {
+            if let restoredLeftPath = SandboxAccessManager.restoreBookmark(for: .left) {
+                leftPath = restoredLeftPath
+            }
+            if let restoredRightPath = SandboxAccessManager.restoreBookmark(for: .right) {
+                rightPath = restoredRightPath
+            }
+        }
     }
     
-        private func copySelectedFiles() {
+    @ViewBuilder
+    private var quickAccessSidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Quick Access")
+                .font(.headline)
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+            
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(quickLocations) { location in
+                        Button {
+                            navigateToLocation(location.url)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: location.icon)
+                                    .foregroundColor(.accentColor)
+                                Text(location.name)
+                                    .lineLimit(1)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    Divider().padding(.vertical, 6)
+                    
+                    if !recentLocations.isEmpty {
+                        Text("Recent")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 4)
+                        
+                        ForEach(recentLocations) { location in
+                            Button {
+                                navigateToLocation(location.url)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: location.icon)
+                                        .foregroundColor(.accentColor)
+                                    Text(location.name)
+                                        .lineLimit(1)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        
+                        Divider().padding(.vertical, 6)
+                    }
+                    
+                    if !pinnedLocations.isEmpty {
+                        Text("Pinned")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 4)
+                        
+                        ForEach(pinnedLocations) { location in
+                            Button {
+                                navigateToLocation(location.url)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: location.icon)
+                                        .foregroundColor(.accentColor)
+                                    Text(location.name)
+                                        .lineLimit(1)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        
+                        Divider().padding(.vertical, 6)
+                    }
+                    
+                    if !mountedVolumes.isEmpty {
+                        Text("Drives")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 4)
+                        
+                        ForEach(mountedVolumes) { location in
+                            Button {
+                                navigateToLocation(location.url)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: location.icon)
+                                        .foregroundColor(.accentColor)
+                                    Text(location.name)
+                                        .lineLimit(1)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        
+                        Divider().padding(.vertical, 6)
+                    }
+                    
+                    Button {
+                        pinActiveFolder()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "pin")
+                                .foregroundColor(.accentColor)
+                            Text("Pin Active Folder")
+                            Spacer()
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Button {
+                        selectFolder(for: activePane)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "folder.badge.plus")
+                                .foregroundColor(.accentColor)
+                            Text("Choose Folder...")
+                            Spacer()
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 6)
+                .padding(.bottom, 8)
+            }
+            
+            Spacer(minLength: 0)
+        }
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+    
+    @ViewBuilder
+    private func explorerToolbarButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.titleAndIcon)
+        }
+        .buttonStyle(.bordered)
+    }
+    
+    @ViewBuilder
+    private func terminalResizeHandle(
+        height: Binding<CGFloat>,
+        dragStartHeight: Binding<CGFloat?>,
+        maxHeight: CGFloat,
+        defaultHeight: CGFloat
+    ) -> some View {
+        Rectangle()
+            .fill(Color(NSColor.separatorColor))
+            .frame(height: 6)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { value in
+                        if dragStartHeight.wrappedValue == nil {
+                            dragStartHeight.wrappedValue = height.wrappedValue
+                        }
+                        let base = dragStartHeight.wrappedValue ?? height.wrappedValue
+                        let proposed = base - value.translation.height
+                        height.wrappedValue = min(max(proposed, 120), max(120, maxHeight))
+                    }
+                    .onEnded { _ in
+                        dragStartHeight.wrappedValue = nil
+                    }
+            )
+            .onTapGesture(count: 2) {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    height.wrappedValue = defaultHeight
+                }
+            }
+    }
+    
+    private func selectFolder(for pane: ActivePane) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open Folder"
+        panel.message = "Choose a folder to grant Folderium access."
+        
+        if panel.runModal() == .OK, let selectedURL = panel.url {
+            let didAccess = selectedURL.startAccessingSecurityScopedResource()
+            guard didAccess else {
+                print("Failed to access security-scoped resource: \(selectedURL.path)")
+                return
+            }
+            
+            switch pane {
+            case .left:
+                leftPath = selectedURL
+                SandboxAccessManager.saveBookmark(for: .left, url: selectedURL)
+            case .right:
+                rightPath = selectedURL
+                SandboxAccessManager.saveBookmark(for: .right, url: selectedURL)
+            }
+        }
+    }
+    
+    private func recordHistoryIfNeeded(for pane: ActivePane, oldValue: URL, newValue: URL) {
+        guard oldValue != newValue else { return }
+        
+        switch pane {
+        case .left:
+            if isNavigatingLeftHistory {
+                isNavigatingLeftHistory = false
+                return
+            }
+            leftBackHistory.append(oldValue)
+            leftForwardHistory.removeAll()
+        case .right:
+            if isNavigatingRightHistory {
+                isNavigatingRightHistory = false
+                return
+            }
+            rightBackHistory.append(oldValue)
+            rightForwardHistory.removeAll()
+        }
+    }
+    
+    private func navigateToLocation(_ url: URL) {
+        switch activePane {
+        case .left:
+            leftPath = url
+        case .right:
+            rightPath = url
+        }
+    }
+    
+    private func pinActiveFolder() {
+        let current = (activePane == .left ? leftPath : rightPath).path
+        var entries = Set(pinnedPathsRaw.split(separator: "\n").map(String.init))
+        entries.insert(current)
+        pinnedPathsRaw = entries.sorted().joined(separator: "\n")
+    }
+    
+    private func navigateBack(in pane: ActivePane) {
+        switch pane {
+        case .left:
+            guard let previous = leftBackHistory.popLast() else { return }
+            isNavigatingLeftHistory = true
+            leftForwardHistory.append(leftPath)
+            leftPath = previous
+        case .right:
+            guard let previous = rightBackHistory.popLast() else { return }
+            isNavigatingRightHistory = true
+            rightForwardHistory.append(rightPath)
+            rightPath = previous
+        }
+    }
+    
+    private func navigateForward(in pane: ActivePane) {
+        switch pane {
+        case .left:
+            guard let next = leftForwardHistory.popLast() else { return }
+            isNavigatingLeftHistory = true
+            leftBackHistory.append(leftPath)
+            leftPath = next
+        case .right:
+            guard let next = rightForwardHistory.popLast() else { return }
+            isNavigatingRightHistory = true
+            rightBackHistory.append(rightPath)
+            rightPath = next
+        }
+    }
+    
+    private func navigateUp(in pane: ActivePane) {
+        switch pane {
+        case .left:
+            let parent = leftPath.deletingLastPathComponent()
+            guard parent.path != leftPath.path else { return }
+            leftPath = parent
+        case .right:
+            let parent = rightPath.deletingLastPathComponent()
+            guard parent.path != rightPath.path else { return }
+            rightPath = parent
+        }
+    }
+    
+    private func renameSelectedItem() {
+        let selection = activePane == .left ? leftSelection : rightSelection
+        guard selection.count == 1, let selectedURL = selection.first else { return }
+        
+        let currentName = selectedURL.lastPathComponent
+        let alert = NSAlert()
+        alert.messageText = "Rename Item"
+        alert.informativeText = "Enter new name for '\(currentName)':"
+        
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        textField.stringValue = currentName
+        textField.selectText(nil)
+        alert.accessoryView = textField
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .informational
+        
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+        
+        let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty, newName != currentName else { return }
+        
+        let newURL = selectedURL.deletingLastPathComponent().appendingPathComponent(newName)
+        do {
+            try FileManager.default.moveItem(at: selectedURL, to: newURL)
+            refreshTrigger = UUID()
+            if activePane == .left {
+                leftSelection = [newURL]
+            } else {
+                rightSelection = [newURL]
+            }
+        } catch {
+            let errorAlert = NSAlert()
+            errorAlert.messageText = "Rename Failed"
+            errorAlert.informativeText = error.localizedDescription
+            errorAlert.addButton(withTitle: "OK")
+            errorAlert.alertStyle = .warning
+            errorAlert.runModal()
+        }
+    }
+    
+    private func copySelectedFiles() {
             let selectedFiles = Array(leftSelection.union(rightSelection))
             print("Copy selected called with \(selectedFiles.count) files")
             
@@ -259,12 +794,12 @@ struct DualPaneView: View {
                         do {
                             for url in urls {
                                 let destinationURL = targetDirectory.appendingPathComponent(url.lastPathComponent)
-                                
-                                // Check if it's a cut operation
-                                print("Is cut operation: \(isCutOperation)")
-                                
-                                // Handle file conflicts by creating a unique name
-                                let finalDestinationURL = getUniqueDestinationURL(for: destinationURL, in: targetDirectory)
+                                let finalDestinationURL = await resolveConflictDestination(
+                                    sourceURL: url,
+                                    destinationURL: destinationURL,
+                                    in: targetDirectory
+                                )
+                                guard let finalDestinationURL else { continue }
                                 
                                 if isCutOperation {
                                     // Move file
@@ -353,6 +888,54 @@ struct DualPaneView: View {
             return destinationURL
         }
         
+        private enum ConflictChoice {
+            case replace
+            case skip
+            case keepBoth
+        }
+        
+        private func resolveConflictDestination(sourceURL: URL, destinationURL: URL, in directory: URL) async -> URL? {
+            guard FileManager.default.fileExists(atPath: destinationURL.path) else {
+                return destinationURL
+            }
+            
+            let choice = await askConflictChoice(sourceURL: sourceURL, destinationURL: destinationURL)
+            switch choice {
+            case .skip:
+                return nil
+            case .keepBoth:
+                return getUniqueDestinationURL(for: destinationURL, in: directory)
+            case .replace:
+                do {
+                    try FileManager.default.removeItem(at: destinationURL)
+                    return destinationURL
+                } catch {
+                    print("Failed to replace destination \(destinationURL.path): \(error)")
+                    return nil
+                }
+            }
+        }
+        
+        @MainActor
+        private func askConflictChoice(sourceURL: URL, destinationURL: URL) -> ConflictChoice {
+            let alert = NSAlert()
+            alert.messageText = "File Conflict"
+            alert.informativeText = "'\(destinationURL.lastPathComponent)' already exists.\nChoose how to continue."
+            alert.addButton(withTitle: "Replace")
+            alert.addButton(withTitle: "Keep Both")
+            alert.addButton(withTitle: "Skip")
+            alert.alertStyle = .warning
+            
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                return .replace
+            case .alertSecondButtonReturn:
+                return .keepBoth
+            default:
+                return .skip
+            }
+        }
+        
         
         
         private func compressSelectedFiles() {
@@ -429,20 +1012,29 @@ struct FilePaneView: View {
     let onRefresh: () -> Void
     let refreshTrigger: UUID
     let onBulkCompress: () -> Void
+    let canNavigateBack: Bool
+    let canNavigateForward: Bool
+    let onNavigateBack: () -> Void
+    let onNavigateForward: () -> Void
+    let onNavigateUp: () -> Void
     let onFocus: () -> Void
     
     @State private var files: [FileItem] = []
+    @State private var displayedFiles: [FileItem] = []
     @State private var isLoading: Bool = false
     @State private var errorMessage: String?
     @State private var sortOrder: SortOrder = .name
     @State private var sortDirection: SortDirection = .ascending
+    @State private var pathInput: String = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
     
     enum SortOrder: CaseIterable {
-        case name, size, modified
+        case name, type, size, modified
         
         var displayName: String {
             switch self {
             case .name: return "Name"
+            case .type: return "Type"
             case .size: return "Size"
             case .modified: return "Modified"
             }
@@ -453,23 +1045,6 @@ struct FilePaneView: View {
         case ascending, descending
     }
     
-        var filteredFiles: [FileItem] {
-            if searchText.isEmpty {
-                return files
-            } else {
-                let searchTerm = searchText
-                return files.filter { file in
-                    file.name.localizedCaseInsensitiveContains(searchTerm)
-                }
-            }
-        }
-        
-        var sortedFiles: [FileItem] {
-            filteredFiles.sorted { first, second in
-                compareFiles(first: first, second: second)
-            }
-        }
-        
         private func compareFiles(first: FileItem, second: FileItem) -> Bool {
             let comparison = getComparisonResult(first: first, second: second)
             return sortDirection == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
@@ -479,6 +1054,8 @@ struct FilePaneView: View {
             switch sortOrder {
             case .name:
                 return first.name.localizedCaseInsensitiveCompare(second.name)
+            case .type:
+                return first.localizedType.localizedCaseInsensitiveCompare(second.localizedType)
             case .size:
                 if first.size < second.size {
                     return .orderedAscending
@@ -505,23 +1082,42 @@ struct FilePaneView: View {
             RoundedRectangle(cornerRadius: 0)
                 .stroke(isActive ? Color.accentColor : Color.clear, lineWidth: 1)
         )
-        .onChange(of: isActive) { _, newValue in
-            print("Pane isActive changed to: \(newValue)")
-        }
         .onAppear {
+            pathInput = path.path
             loadFiles()
         }
         .onChange(of: path) { _, _ in
             // Clear selection when path changes
             selection = []
+            pathInput = path.path
             loadFiles()
         }
         .onChange(of: searchText) { _, _ in
-            // Search filtering is handled automatically by filteredFiles computed property
-            // No additional action needed
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    applyFiltersAndSorting()
+                }
+            }
         }
         .onChange(of: refreshTrigger) { _, _ in
             loadFiles()
+        }
+        .onChange(of: sortOrder) { _, _ in
+            applyFiltersAndSorting()
+        }
+        .onChange(of: sortDirection) { _, _ in
+            applyFiltersAndSorting()
+        }
+        .onKeyPress(.downArrow) {
+            moveSelectionByArrow(delta: 1)
+            return .handled
+        }
+        .onKeyPress(.upArrow) {
+            moveSelectionByArrow(delta: -1)
+            return .handled
         }
     }
     
@@ -548,7 +1144,6 @@ struct FilePaneView: View {
             
             TextField("Search in \(title.lowercased())...", text: $searchText, onEditingChanged: { isEditing in
                 if isEditing {
-                    print("Search field started editing - triggering focus")
                     onFocus()
                 }
             })
@@ -557,8 +1152,6 @@ struct FilePaneView: View {
                     performSearch()
                 }
                 .onChange(of: searchText) { _, _ in
-                    // Trigger focus when user starts typing
-                    print("Search text changed - triggering focus")
                     onFocus()
                 }
             
@@ -575,7 +1168,6 @@ struct FilePaneView: View {
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(6)
         .onTapGesture {
-            print("Search field focus triggered")
             onFocus()
         }
     }
@@ -587,17 +1179,45 @@ struct FilePaneView: View {
         }
         .buttonStyle(.bordered)
         .onTapGesture {
-            print("Terminal button focus triggered")
             onFocus()
         }
     }
     
     @ViewBuilder
     private var pathBarView: some View {
-        HStack {
-            Spacer()
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Button {
+                    onNavigateBack()
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canNavigateBack)
+                
+                Button {
+                    onNavigateForward()
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canNavigateForward)
+                
+                Button {
+                    onNavigateUp()
+                } label: {
+                    Image(systemName: "arrow.up")
+                }
+                .buttonStyle(.bordered)
+                
+                TextField("Enter path", text: $pathInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onSubmit {
+                        commitPathInput()
+                    }
+            }
             
-            // Breadcrumb navigation
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     ForEach(Array(pathComponents.enumerated()), id: \.offset) { index, component in
@@ -606,10 +1226,6 @@ struct FilePaneView: View {
                         }
                         .buttonStyle(.borderless)
                         .foregroundColor(.blue)
-                        .onTapGesture {
-                            print("Breadcrumb link focus triggered")
-                            onFocus()
-                        }
                         
                         if index < pathComponents.count - 1 {
                             Image(systemName: "chevron.right")
@@ -617,15 +1233,13 @@ struct FilePaneView: View {
                                 .foregroundColor(.secondary)
                         }
                     }
-                    .padding(.horizontal, 2)
                 }
             }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(Color(NSColor.controlBackgroundColor))
         .onTapGesture {
-            print("Breadcrumb focus triggered")
             onFocus()
         }
         
@@ -683,12 +1297,34 @@ struct FilePaneView: View {
         HStack {
             nameHeaderButton
             Spacer()
+            typeHeaderButton
             sizeHeaderButton
             modifiedHeaderButton
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    @ViewBuilder
+    private var typeHeaderButton: some View {
+        Button(action: { sortBy(.type) }) {
+            HStack {
+                Text("Type")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                if sortOrder == .type {
+                    Image(systemName: sortDirection == .ascending ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                }
+            }
+        }
+        .buttonStyle(.borderless)
+        .foregroundColor(.primary)
+        .frame(width: 130, alignment: .leading)
+        .onTapGesture {
+            onFocus()
+        }
     }
     
     @ViewBuilder
@@ -760,7 +1396,7 @@ struct FilePaneView: View {
     private var tableContent: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(Array(sortedFiles.enumerated()), id: \.element.url) { index, file in
+                ForEach(Array(displayedFiles.enumerated()), id: \.element.url) { index, file in
                     FileRowView(
                         file: file,
                         isSelected: selection.contains(file.url),
@@ -786,7 +1422,6 @@ struct FilePaneView: View {
         .modifier(DraggableModifier(selection: selection, dragPreview: createDragPreview))
         .contentShape(Rectangle())
         .onTapGesture {
-            print("File list area focus triggered")
             onFocus()
         }
         .contextMenu {
@@ -802,7 +1437,7 @@ struct FilePaneView: View {
     
     @ViewBuilder
     private var statusBar: some View {
-        StatusBarView(files: filteredFiles)
+        StatusBarView(files: displayedFiles)
     }
     
     private var pathComponents: [String] {
@@ -970,6 +1605,7 @@ struct FilePaneView: View {
                 
                 await MainActor.run {
                     self.files = fileItems
+                    self.applyFiltersAndSorting()
                     self.isLoading = false
                     // Clear selection of files that no longer exist
                     self.selection = self.selection.filter { url in
@@ -989,8 +1625,114 @@ struct FilePaneView: View {
     }
     
     private func performSearch() {
-        // Search filtering is handled by the filteredFiles computed property
-        // No additional action needed as the view will automatically update
+        applyFiltersAndSorting()
+    }
+    
+    private func applyFiltersAndSorting() {
+        var result = files
+        let searchTerm = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if !searchTerm.isEmpty {
+            result = result.filter { file in
+                matchesSearch(file: file, query: searchTerm)
+            }
+        }
+        
+        result.sort { first, second in
+            compareFiles(first: first, second: second)
+        }
+        
+        displayedFiles = result
+    }
+    
+    private func moveSelectionByArrow(delta: Int) {
+        guard !displayedFiles.isEmpty else { return }
+        
+        let orderedURLs = displayedFiles.map(\.url)
+        
+        if let current = selection.first, let currentIndex = orderedURLs.firstIndex(of: current) {
+            let nextIndex = min(max(currentIndex + delta, 0), orderedURLs.count - 1)
+            selection = [orderedURLs[nextIndex]]
+        } else {
+            let initialIndex = delta > 0 ? 0 : orderedURLs.count - 1
+            selection = [orderedURLs[initialIndex]]
+        }
+        
+        onFocus()
+    }
+    
+    private func matchesSearch(file: FileItem, query: String) -> Bool {
+        let parts = query.split(separator: " ").map(String.init)
+        var nameTerms: [String] = []
+        var extFilter: String?
+        var typeFilter: String?
+        var minSize: Int64?
+        var maxSize: Int64?
+        
+        for part in parts {
+            let lowered = part.lowercased()
+            if lowered.hasPrefix("ext:") {
+                extFilter = String(lowered.dropFirst(4))
+            } else if lowered.hasPrefix("type:") {
+                typeFilter = String(lowered.dropFirst(5))
+            } else if lowered.hasPrefix("size>") {
+                if let value = Int64(lowered.dropFirst(5)) { minSize = value * 1024 }
+            } else if lowered.hasPrefix("size<") {
+                if let value = Int64(lowered.dropFirst(5)) { maxSize = value * 1024 }
+            } else {
+                nameTerms.append(part)
+            }
+        }
+        
+        if let extFilter, !file.fileExtension.lowercased().contains(extFilter) {
+            return false
+        }
+        
+        if let typeFilter, !file.localizedType.lowercased().contains(typeFilter) {
+            return false
+        }
+        
+        if let minSize, file.size < minSize {
+            return false
+        }
+        
+        if let maxSize, file.size > maxSize {
+            return false
+        }
+        
+        if nameTerms.isEmpty {
+            return true
+        }
+        
+        return nameTerms.allSatisfy { term in
+            file.name.localizedCaseInsensitiveContains(term)
+        }
+    }
+    
+    private func commitPathInput() {
+        let trimmedPath = pathInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else {
+            pathInput = path.path
+            return
+        }
+        
+        let expandedPath = (trimmedPath as NSString).expandingTildeInPath
+        let resolvedURL: URL
+        
+        if expandedPath.hasPrefix("/") {
+            resolvedURL = URL(fileURLWithPath: expandedPath)
+        } else {
+            resolvedURL = path.appendingPathComponent(expandedPath)
+        }
+        
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            errorMessage = "Path is not a readable folder: \(resolvedURL.path)"
+            return
+        }
+        
+        path = resolvedURL
+        errorMessage = nil
     }
     
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
@@ -1035,7 +1777,9 @@ struct FilePaneView: View {
             do {
                 for sourceURL in sourceURLs {
                     let destinationURL = path.appendingPathComponent(sourceURL.lastPathComponent)
-                    let finalDestinationURL = getUniqueDestinationURL(for: destinationURL)
+                    guard let finalDestinationURL = await resolveDropConflict(sourceURL: sourceURL, destinationURL: destinationURL) else {
+                        continue
+                    }
                     
                     if isMove {
                         try FileManager.default.moveItem(at: sourceURL, to: finalDestinationURL)
@@ -1087,6 +1831,54 @@ struct FilePaneView: View {
         
         print("File conflict resolved: \(url.lastPathComponent) -> \(destinationURL.lastPathComponent)")
         return destinationURL
+    }
+    
+    private enum DropConflictChoice {
+        case replace
+        case skip
+        case keepBoth
+    }
+    
+    private func resolveDropConflict(sourceURL: URL, destinationURL: URL) async -> URL? {
+        guard FileManager.default.fileExists(atPath: destinationURL.path) else {
+            return destinationURL
+        }
+        
+        let choice = await askDropConflictChoice(sourceURL: sourceURL, destinationURL: destinationURL)
+        switch choice {
+        case .skip:
+            return nil
+        case .keepBoth:
+            return getUniqueDestinationURL(for: destinationURL)
+        case .replace:
+            do {
+                try FileManager.default.removeItem(at: destinationURL)
+                return destinationURL
+            } catch {
+                print("Failed to replace dropped file destination: \(error)")
+                return nil
+            }
+        }
+    }
+    
+    @MainActor
+    private func askDropConflictChoice(sourceURL: URL, destinationURL: URL) -> DropConflictChoice {
+        let alert = NSAlert()
+        alert.messageText = "File Conflict"
+        alert.informativeText = "'\(destinationURL.lastPathComponent)' already exists.\nChoose how to continue."
+        alert.addButton(withTitle: "Replace")
+        alert.addButton(withTitle: "Keep Both")
+        alert.addButton(withTitle: "Skip")
+        alert.alertStyle = .warning
+        
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .replace
+        case .alertSecondButtonReturn:
+            return .keepBoth
+        default:
+            return .skip
+        }
     }
     
     private func createDragPreview() -> AnyView {
@@ -1142,6 +1934,13 @@ struct FilePaneView: View {
 }
 
 struct FileRowView: View {
+    private static let rowDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter
+    }()
+    
     let file: FileItem
     let isSelected: Bool
     let currentSelection: Set<URL>
@@ -1178,6 +1977,13 @@ struct FileRowView: View {
             
             Spacer()
             
+            // Type column
+            Text(file.localizedType)
+                .font(.system(.body, design: .default))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .frame(width: 130, alignment: .leading)
+            
             // Size column
             Text(file.isDirectory ? "--" : file.sizeString)
                 .font(.system(.body, design: .default))
@@ -1205,8 +2011,6 @@ struct FileRowView: View {
             let isCommandPressed = NSEvent.modifierFlags.contains(.command)
             let isShiftPressed = NSEvent.modifierFlags.contains(.shift)
             onSelectWithModifiers(isCommandPressed, isShiftPressed)
-            // Also ensure the pane gets focus when clicking on files
-            print("File row focus triggered")
             onFocus()
         }
         .contextMenu {
@@ -1239,11 +2043,72 @@ struct FileRowView: View {
     
     private func formatDate(_ date: Date?) -> String {
         guard let date = date else { return "--" }
+        return Self.rowDateFormatter.string(from: date)
+    }
+}
+
+// MARK: - Sandbox Access
+
+enum PaneBookmarkKey: String {
+    case left, right
+}
+
+enum SandboxAccessManager {
+    private static let leftBookmarkKey = "folderium.bookmark.left"
+    private static let rightBookmarkKey = "folderium.bookmark.right"
+    static let defaultDirectory = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        ?? URL(fileURLWithPath: NSHomeDirectory())
+    
+    static func saveBookmark(for pane: PaneBookmarkKey, url: URL) {
+        do {
+            let data = try url.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            UserDefaults.standard.set(data, forKey: bookmarkKey(for: pane))
+        } catch {
+            print("Failed to save bookmark for \(pane.rawValue): \(error)")
+        }
+    }
+    
+    static func restoreBookmark(for pane: PaneBookmarkKey) -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: bookmarkKey(for: pane)) else {
+            return nil
+        }
         
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+        var isStale = false
+        do {
+            let url = try URL(
+                resolvingBookmarkData: data,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            
+            if isStale {
+                saveBookmark(for: pane, url: url)
+            }
+            
+            guard url.startAccessingSecurityScopedResource() else {
+                print("Failed to access restored bookmark for \(pane.rawValue)")
+                return nil
+            }
+            
+            return url
+        } catch {
+            print("Failed to restore bookmark for \(pane.rawValue): \(error)")
+            return nil
+        }
+    }
+    
+    private static func bookmarkKey(for pane: PaneBookmarkKey) -> String {
+        switch pane {
+        case .left:
+            return leftBookmarkKey
+        case .right:
+            return rightBookmarkKey
+        }
     }
 }
 
@@ -1255,7 +2120,11 @@ class FileTab: ObservableObject, Identifiable, Equatable {
     @Published var leftPath: URL
     @Published var rightPath: URL
     
-    init(name: String = "New Tab", leftPath: URL = URL(fileURLWithPath: "/Users/\(NSUserName())"), rightPath: URL = URL(fileURLWithPath: "/Users/\(NSUserName())")) {
+    init(
+        name: String = "New Tab",
+        leftPath: URL = SandboxAccessManager.defaultDirectory,
+        rightPath: URL = SandboxAccessManager.defaultDirectory
+    ) {
         self.name = name
         self.leftPath = leftPath
         self.rightPath = rightPath
@@ -1293,6 +2162,7 @@ struct FileItem {
     let sizeString: String
     let modificationDate: Date?
     let fileExtension: String
+    let localizedType: String
     
     init(url: URL) {
         self.url = url
@@ -1300,7 +2170,7 @@ struct FileItem {
         self.fileExtension = url.pathExtension.lowercased()
         
         do {
-            let resourceValues = try url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .isSymbolicLinkKey])
+            let resourceValues = try url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .isSymbolicLinkKey, .localizedTypeDescriptionKey])
             var detectedIsDirectory = resourceValues.isDirectory ?? false
             let isSymbolicLink = resourceValues.isSymbolicLink ?? false
             
@@ -1321,12 +2191,14 @@ struct FileItem {
             self.isSymbolicLink = isSymbolicLink
             self.size = Int64(resourceValues.fileSize ?? 0)
             self.modificationDate = resourceValues.contentModificationDate
+            self.localizedType = resourceValues.localizedTypeDescription ?? Self.defaultTypeName(for: fileExtension, isDirectory: detectedIsDirectory)
         } catch {
             print("Error getting resource values for \(url): \(error)")
             self.isDirectory = false
             self.isSymbolicLink = false
             self.size = 0
             self.modificationDate = nil
+            self.localizedType = Self.defaultTypeName(for: fileExtension, isDirectory: false)
         }
         
         if isDirectory {
@@ -1334,6 +2206,12 @@ struct FileItem {
         } else {
             self.sizeString = ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
         }
+    }
+    
+    private static func defaultTypeName(for fileExtension: String, isDirectory: Bool) -> String {
+        if isDirectory { return "Folder" }
+        if fileExtension.isEmpty { return "File" }
+        return fileExtension.uppercased() + " File"
     }
     
     var iconName: String {
@@ -1482,23 +2360,31 @@ struct FileContextMenu: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Select the file when context menu appears
             Button("Open") {
-                onSelect() // Select the file first
+                onSelect()
                 openFile()
             }
             
-            Button("Open With") {
-                // TODO: Implement Open With submenu
-            }
-            
-            Button("Edit") {
-                editFile()
+            Button("Open in New Window") {
+                openInNewWindow()
             }
             
             Divider()
             
-            // Compress section
+            Button("Cut") {
+                cutToClipboard()
+            }
+            
+            Button("Copy") {
+                copyToClipboard()
+            }
+            
+            Button("Copy path") {
+                copyPaths()
+            }
+            
+            Divider()
+            
             Button(currentSelection.count > 1 ? "Compress Selected (\(currentSelection.count))" : "Compress") {
                 if currentSelection.count > 1 {
                     onBulkCompress()
@@ -1513,62 +2399,30 @@ struct FileContextMenu: View {
                 }
             }
             
-            Button("Duplicate") {
-                duplicateFile()
-            }
-            
-            Divider()
-            
-            // Info section
-            Button("Get Info") {
-                getInfo()
-            }
-            
-            Button("Preview") {
-                previewFile()
-            }
-            
             Button("Reveal in Finder") {
                 revealInFinder()
             }
             
-            Button("Share") {
-                // TODO: Implement Share submenu
-            }
-            
             Divider()
             
-            // Copy section
-            Button("Copy to Clipboard") {
-                copyToClipboard()
-            }
-            
-            Button("Copy Paths") {
-                copyPaths()
-            }
-            
-            Divider()
-            
-            // Modify section
             Button("Rename") {
                 renameFile()
             }
             
-            Button("Move to Trash") {
-                onSelect() // Select the file first
+            Button("Delete") {
+                onSelect()
                 showNSAlert(for: .moveToTrash)
             }
             
-            Button("Delete") {
-                onSelect() // Select the file first
+            Button("Delete Permanently") {
+                onSelect()
                 showNSAlert(for: .delete)
             }
             
             Divider()
             
-            // Services section
-            Button("Services") {
-                // TODO: Implement Services submenu
+            Button("Properties") {
+                getInfo()
             }
         }
     }
@@ -1609,16 +2463,10 @@ struct FileContextMenu: View {
     }
     
     private func openFile() {
-        if file.isDirectory {
-            // For folders, this would navigate into them
-            // This is handled by double-click in the main view
-        } else {
-            NSWorkspace.shared.open(file.url)
-        }
+        NSWorkspace.shared.open(file.url)
     }
     
-    private func editFile() {
-        // Open with default text editor
+    private func openInNewWindow() {
         NSWorkspace.shared.open(file.url)
     }
     
@@ -1679,12 +2527,6 @@ struct FileContextMenu: View {
                 print("Error extracting file: \(error)")
             }
         }
-    }
-    
-    private func duplicateFile() {
-        // TODO: Implement file duplication
-        print("Duplicate: \(file.name)")
-        onFileOperation() // Refresh the file list
     }
     
     private func getInfo() {
@@ -1784,11 +2626,6 @@ struct FileContextMenu: View {
         return infoText
     }
     
-    private func previewFile() {
-        // Open Quick Look
-        NSWorkspace.shared.open(file.url)
-    }
-    
     private func revealInFinder() {
         NSWorkspace.shared.activateFileViewerSelecting([file.url])
     }
@@ -1796,6 +2633,15 @@ struct FileContextMenu: View {
     private func copyToClipboard() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
+        pasteboard.writeObjects([file.url as NSURL])
+        pasteboard.setString(file.url.path, forType: .string)
+    }
+    
+    private func cutToClipboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([file.url as NSURL])
+        pasteboard.setString("cut", forType: NSPasteboard.PasteboardType("public.folderium.cut"))
         pasteboard.setString(file.url.path, forType: .string)
     }
     
@@ -2100,27 +2946,6 @@ struct RealTerminalView: View {
         }
     }
     
-    private func openInTerminal() {
-        let escapedPath = currentWorkingDirectory.path.replacingOccurrences(of: "'", with: "\\'")
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "cd '\(escapedPath)'"
-        end tell
-        """
-        
-        executeAppleScript(script)
-    }
-    
-    private func executeAppleScript(_ script: String) {
-        let appleScript = NSAppleScript(source: script)
-        var error: NSDictionary?
-        appleScript?.executeAndReturnError(&error)
-        
-        if let error = error {
-            print("Error opening terminal: \(error)")
-        }
-    }
 }
 
 struct TerminalResult {
@@ -2155,7 +2980,6 @@ struct EmptyAreaContextMenu: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Group 1: New items
             Button("New Folder") {
                 createNewFolder()
             }
@@ -2166,44 +2990,21 @@ struct EmptyAreaContextMenu: View {
             
             Divider()
             
-            // Group 2: Directory operations
-            Button("Edit Folder") {
-                editFolder()
-            }
-            
             Button("Refresh") {
                 onFileOperation()
             }
             
             Divider()
             
-            // Group 3: Info and actions
-            Button("Get Info") {
-                getInfo()
-            }
-            
             Button("Reveal in Finder") {
                 revealInFinder()
             }
             
-            Button("Share") {
-                shareFolder()
-            }
-            
-            Divider()
-            
-            // Group 4: Utilities
-            Button("Copy to Clipboard") {
-                copyToClipboard()
-            }
-            
-            Button("Copy Folder Path") {
+            Button("Copy Path") {
                 copyFolderPath()
             }
             
-            Button("Open External Terminal Here") {
-                openExternalTerminal()
-            }
+            Divider()
             
             Button("Analyze Disk Usage") {
                 analyzeDiskUsage()
@@ -2211,9 +3012,8 @@ struct EmptyAreaContextMenu: View {
             
             Divider()
             
-            // Group 5: Services
-            Button("Services") {
-                // Services submenu would be handled by macOS
+            Button("Properties") {
+                getInfo()
             }
         }
     }
@@ -2297,11 +3097,6 @@ struct EmptyAreaContextMenu: View {
         }
     }
     
-    private func editFolder() {
-        // Open the folder in Finder for editing (rename, etc.)
-        NSWorkspace.shared.activateFileViewerSelecting([currentPath])
-    }
-    
     private func getInfo() {
         // Show folder info
         NSWorkspace.shared.activateFileViewerSelecting([currentPath])
@@ -2311,40 +3106,10 @@ struct EmptyAreaContextMenu: View {
         NSWorkspace.shared.activateFileViewerSelecting([currentPath])
     }
     
-    private func shareFolder() {
-        // Open share sheet for the folder
-        let sharingService = NSSharingService(named: .sendViaAirDrop)
-        sharingService?.perform(withItems: [currentPath])
-    }
-    
-    private func copyToClipboard() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(currentPath.path, forType: .string)
-    }
-    
     private func copyFolderPath() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(currentPath.path, forType: .string)
-    }
-    
-    private func openExternalTerminal() {
-        let escapedPath = currentPath.path.replacingOccurrences(of: "'", with: "\\'")
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "cd '\(escapedPath)'"
-        end tell
-        """
-        
-        let appleScript = NSAppleScript(source: script)
-        var error: NSDictionary?
-        appleScript?.executeAndReturnError(&error)
-        
-        if let error = error {
-            print("Error opening terminal: \(error)")
-        }
     }
     
     private func analyzeDiskUsage() {

@@ -1,23 +1,90 @@
 import SwiftUI
 
 struct ContentView: View {
+    private let defaultPreviewWidthRatio: CGFloat = 0.22
     @State private var selectedFiles: Set<URL> = []
+    @State private var previewSelection: Set<URL> = []
+    @State private var isPreviewVisible: Bool = true
+    @State private var previewWidthRatio: CGFloat = 0.22
+    @State private var previewDragStartWidth: CGFloat?
+    @State private var previewUpdateTask: Task<Void, Never>?
     
     var body: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 0) {
-                // Dual pane content - takes 4/5 of the width
-                DualPaneView(onSelectionChange: { selection in
-                    selectedFiles = selection
-                })
-                .frame(width: geometry.size.width * 0.8) // 4/5 of the width
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
                 
-                Divider()
-                
-                // Preview pane - takes 1/5 of the width
-                FilePreviewView(selectedFiles: Array(selectedFiles))
-                    .frame(width: geometry.size.width * 0.2) // 1/5 of the width
-                    .id("preview-\(selectedFiles.count)")
+                Button(isPreviewVisible ? "Hide Preview" : "Show Preview") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isPreviewVisible.toggle()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+            }
+            .background(Color(NSColor.controlBackgroundColor))
+            
+            Divider()
+            
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    // Dual pane content
+                    DualPaneView(onSelectionChange: { selection in
+                        selectedFiles = selection
+                    })
+                    .frame(width: isPreviewVisible ? geometry.size.width * (1 - previewWidthRatio) : geometry.size.width)
+                    
+                    if isPreviewVisible {
+                        Rectangle()
+                            .fill(Color(NSColor.separatorColor))
+                            .frame(width: 6)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 2)
+                                    .onChanged { value in
+                                        let totalWidth = geometry.size.width
+                                        guard totalWidth > 0 else { return }
+                                        let currentPreviewWidth = totalWidth * previewWidthRatio
+                                        if previewDragStartWidth == nil {
+                                            previewDragStartWidth = currentPreviewWidth
+                                        }
+                                        let baseWidth = previewDragStartWidth ?? currentPreviewWidth
+                                        let proposedPreviewWidth = baseWidth - value.translation.width
+                                        let minPreviewWidth = max(220, totalWidth * 0.15)
+                                        let maxPreviewWidth = totalWidth * 0.45
+                                        let clamped = min(max(proposedPreviewWidth, minPreviewWidth), maxPreviewWidth)
+                                        previewWidthRatio = clamped / totalWidth
+                                    }
+                                    .onEnded { _ in
+                                        previewDragStartWidth = nil
+                                    }
+                            )
+                            .onTapGesture(count: 2) {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    previewWidthRatio = defaultPreviewWidthRatio
+                                }
+                            }
+                        
+                        // Preview pane
+                        FilePreviewView(selectedFiles: Array(previewSelection))
+                            .frame(width: geometry.size.width * previewWidthRatio)
+                            .id("preview-\(previewSelection.count)")
+                    }
+                }
+            }
+        }
+        .onAppear {
+            previewSelection = selectedFiles
+        }
+        .onChange(of: selectedFiles) { _, newValue in
+            previewUpdateTask?.cancel()
+            previewUpdateTask = Task {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    previewSelection = newValue
+                }
             }
         }
     }

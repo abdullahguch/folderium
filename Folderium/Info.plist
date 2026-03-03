@@ -65,9 +65,5 @@
             </array>
         </dict>
     </array>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Folderium needs access to Apple Events to open Terminal and other applications.</string>
-    <key>NSSystemAdministrationUsageDescription</key>
-    <string>Folderium needs system administration access to manage files and archives.</string>
 </dict>
 </plist>

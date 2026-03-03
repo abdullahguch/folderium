@@ -6,7 +6,7 @@
 		<title>Folderium - Modern File Manager for macOS</title>
 		<meta
 			name="description"
-			content="A native macOS file manager with dual-pane layout, built with Swift and SwiftUI. Inspired by Marta but open-source." />
+			content="A native macOS dual-pane file manager with Explorer-style familiarity mode, resizable panes, conflict dialogs, and built-in terminal support." />
 		<link rel="icon" type="image/svg+xml" href="folderium-logo.svg" />
 		<link rel="alternate icon" href="folderium-logo.svg" />
 		<script src="https://cdn.tailwindcss.com"></script>
@@ -134,8 +134,8 @@
 					</div>
 					<h1 class="text-4xl md:text-6xl font-bold text-gray-900 mb-6">Folderium</h1>
 					<p class="text-xl md:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto">
-						A native macOS file manager with dual-pane layout, inspired by Marta but open-source. Built
-						entirely with Swift and SwiftUI.
+						A native macOS file manager with dual-pane workflow and Windows Explorer familiarity mode.
+						Built entirely with Swift and SwiftUI.
 					</p>
 					<div class="flex flex-col sm:flex-row gap-4 justify-center">
 						<a
@@ -145,10 +145,10 @@
 							View on GitHub
 						</a>
 						<a
-							href="Folderium-1.0.0.dmg"
+							href="Folderium-1.1.0.dmg"
 							class="bg-white text-folderium-blue border-2 border-folderium-blue px-8 py-4 rounded-lg font-semibold text-lg hover:bg-folderium-blue hover:text-white transition-colors shadow-lg">
 							<i class="fas fa-download mr-2"></i>
-							Download
+							Download v1.1.0
 						</a>
 					</div>
 				</div>
@@ -173,8 +173,7 @@
 						</div>
 						<h3 class="text-xl font-bold text-gray-900 mb-4">Dual-Pane Interface</h3>
 						<p class="text-gray-600">
-							Two-pane layout for efficient file management with resizable panes and active pane
-							highlighting.
+							Two-pane layout with active pane focus, keyboard navigation, and independent history.
 						</p>
 					</div>
 
@@ -185,8 +184,8 @@
 						</div>
 						<h3 class="text-xl font-bold text-gray-900 mb-4">Advanced Search</h3>
 						<p class="text-gray-600">
-							Real-time filtering, per-pane search, and system-wide Spotlight integration with regex
-							support.
+							Real-time filtering with token filters like <code>ext:</code>, <code>type:</code>,
+							<code>size&gt;</code>, and <code>size&lt;</code>, plus Spotlight integration.
 						</p>
 					</div>
 
@@ -197,7 +196,8 @@
 						</div>
 						<h3 class="text-xl font-bold text-gray-900 mb-4">File Operations</h3>
 						<p class="text-gray-600">
-							Copy, cut, paste, rename, delete with drag & drop support and conflict resolution.
+							Copy, cut, paste, rename, delete, drag & drop, and conflict dialogs with Replace, Keep
+							Both, and Skip.
 						</p>
 					</div>
 
@@ -208,29 +208,32 @@
 						</div>
 						<h3 class="text-xl font-bold text-gray-900 mb-4">Archive Support</h3>
 						<p class="text-gray-600">
-							Compress and extract from ZIP, RAR, 7Z, TAR, GZIP, BZIP2, XZ, CAB, ISO, and more.
+							Create ZIP/TAR/GZIP/BZIP2 archives and extract/list ZIP/TAR/GZIP/BZIP2 using native system
+							tools.
 						</p>
 					</div>
 
-					<!-- Terminal Integration -->
+					<!-- Windows Familiarity -->
 					<div class="bg-folderium-light-gray rounded-xl p-8 hover:shadow-lg transition-shadow">
 						<div class="bg-folderium-blue rounded-lg w-16 h-16 flex items-center justify-center mb-6">
-							<i class="fas fa-terminal text-white text-2xl"></i>
+							<i class="fas fa-window-restore text-white text-2xl"></i>
 						</div>
-						<h3 class="text-xl font-bold text-gray-900 mb-4">Terminal Integration</h3>
+						<h3 class="text-xl font-bold text-gray-900 mb-4">Windows Familiarity Mode</h3>
 						<p class="text-gray-600">
-							Embedded terminal with two-way directory sync and full command history support.
+							Explorer-style toolbar and context menus, Quick Access/sidebar navigation, and F2 rename
+							for easy switching from Windows.
 						</p>
 					</div>
 
-					<!-- Cloud Storage -->
+					<!-- Resizable Layout -->
 					<div class="bg-folderium-light-gray rounded-xl p-8 hover:shadow-lg transition-shadow">
 						<div class="bg-folderium-blue rounded-lg w-16 h-16 flex items-center justify-center mb-6">
-							<i class="fas fa-cloud text-white text-2xl"></i>
+							<i class="fas fa-up-down-left-right text-white text-2xl"></i>
 						</div>
-						<h3 class="text-xl font-bold text-gray-900 mb-4">Cloud Storage</h3>
+						<h3 class="text-xl font-bold text-gray-900 mb-4">Resizable Workspace</h3>
 						<p class="text-gray-600">
-							OneDrive, Dropbox, Google Drive, iCloud integration with symbolic link resolution.
+							Resize the preview pane, sidebar, left/right pane split, and terminal heights with draggable
+							splitters and double-click reset.
 						</p>
 					</div>
 				</div>
@@ -269,16 +272,16 @@
 							<i class="fas fa-desktop text-folderium-blue text-4xl mr-4"></i>
 							<div>
 								<h3 class="text-2xl font-bold text-gray-900">macOS</h3>
-								<p class="text-gray-600">Version 1.0.0</p>
+								<p class="text-gray-600">Version 1.1.0</p>
 							</div>
 						</div>
 
 						<div class="space-y-4">
 							<a
-								href="Folderium-1.0.0.dmg"
+								href="Folderium-1.1.0.dmg"
 								class="w-full bg-folderium-blue text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-blue-600 transition-colors shadow-lg flex items-center justify-center">
 								<i class="fas fa-download mr-2"></i>
-								Download DMG
+								Download v1.1.0 DMG
 							</a>
 							<a
 								href="https://github.com/abdullahguch/folderium"

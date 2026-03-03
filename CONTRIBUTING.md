@@ -1,158 +1,110 @@
 # Contributing to Folderium
 
-Thank you for your interest in contributing to Folderium! This document provides guidelines and information for contributors.
+Thanks for contributing to Folderium. This guide explains how to propose changes, develop locally, and submit pull requests.
 
-## Code of Conduct
+## Before You Start
 
-This project follows a code of conduct that we expect all contributors to follow. Please be respectful and constructive in all interactions.
-
-## How to Contribute
-
-### Reporting Issues
-
-Before creating an issue, please:
-1. Check if the issue already exists
-2. Search through closed issues
-3. Make sure you're using the latest version
-
-When creating an issue, please include:
-- **macOS version** you're running
-- **Steps to reproduce** the issue
-- **Expected behavior** vs actual behavior
-- **Screenshots** if applicable
-- **Console logs** if there are any errors
-
-### Suggesting Features
-
-We welcome feature suggestions! Please:
-1. Check if the feature has already been requested
-2. Provide a clear description of the feature
-3. Explain why it would be useful
-4. Consider the impact on the existing codebase
-
-### Pull Requests
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/your-feature-name`
-3. **Make your changes** following our coding standards
-4. **Test your changes** thoroughly
-5. **Update documentation** if needed
-6. **Commit your changes**: `git commit -m 'Add your feature'`
-7. **Push to your fork**: `git push origin feature/your-feature-name`
-8. **Create a Pull Request**
+- Search open and closed issues to avoid duplicates.
+- For bugs, include:
+  - macOS version
+  - steps to reproduce
+  - expected vs actual behavior
+  - screenshots and/or logs when helpful
+- For features, explain the use case and user impact.
 
 ## Development Setup
 
 ### Prerequisites
-- macOS 14.0 or later
-- Xcode 15.0 or later
+
+- macOS 14.0+
+- Xcode 15+
 - Git
 
-### Getting Started
-1. Fork and clone the repository
-2. Open `Folderium.xcodeproj` in Xcode
-3. Build and run the project
-4. Make your changes
-5. Test thoroughly
+### Run Locally
 
-## Coding Standards
+```bash
+git clone https://github.com/yourusername/folderium.git
+cd folderium
+open Folderium.xcodeproj
+```
 
-### Swift Style Guide
-- Follow Apple's Swift API Design Guidelines
-- Use meaningful variable and function names
-- Add comments for complex logic
-- Keep functions focused and small
+Then run with `Cmd + R` in Xcode.
 
-### SwiftUI Best Practices
-- Use `@State`, `@Binding`, `@ObservedObject` appropriately
-- Prefer `@ViewBuilder` for complex view composition
-- Use proper view modifiers and avoid deep nesting
-- Follow SwiftUI naming conventions
+### Optional CLI Build
 
-### Code Organization
-- Keep related code together
-- Use MARK comments to organize sections
-- Follow the existing file structure
-- Add proper documentation
+```bash
+xcodebuild -project Folderium.xcodeproj -scheme Folderium -configuration Debug build
+```
 
-## Testing
+### Project Verification Script
 
-### Manual Testing
-- Test on different macOS versions
-- Test with various file types and sizes
-- Test edge cases and error conditions
-- Test accessibility features
+```bash
+./scripts/verify_build.sh
+```
 
-### Areas to Test
-- File operations (copy, move, delete, rename)
-- Search functionality
-- Terminal integration
-- Archive operations
-- Context menus
-- Drag and drop
-- Keyboard shortcuts
+## Pull Request Workflow
+
+1. Fork the repository.
+2. Create a branch:
+
+   ```bash
+   git checkout -b feature/short-description
+   ```
+
+3. Make focused, small changes.
+4. Verify the app builds and manually test affected features.
+5. Update `README.md` if user-facing behavior changed.
+6. Commit with a clear message.
+7. Push and open a PR against `main`.
+
+## Coding Guidelines
+
+### Swift / SwiftUI
+
+- Follow Swift API Design Guidelines.
+- Keep views and functions focused and readable.
+- Prefer descriptive naming over abbreviations.
+- Add comments only where logic is non-obvious.
+- Follow existing project style in nearby code.
+
+### Project Structure
+
+- UI and interaction flow primarily live under `Folderium/`.
+- Domain logic lives in `Folderium/Managers/`.
+- Keep new code in the closest existing module unless a new module is justified.
+
+## Testing Expectations
+
+This repository currently relies primarily on build checks and manual validation.
+
+Before opening a PR, test the areas you touched. Common areas:
+
+- file operations (copy/move/delete/rename/create)
+- archive operations (create/extract/list where applicable)
+- search behavior (local/regex/content/Spotlight)
+- terminal integration
+- drag and drop and context menu actions
+
+If you add automated tests in the future, include them in your PR and mention how to run them.
+
+## CI
+
+GitHub Actions runs macOS builds for push/PR events (`.github/workflows/build.yml`).
+Make sure your branch builds locally before opening a PR.
 
 ## Documentation
 
-### Code Documentation
-- Add comments for complex functions
-- Document public APIs
-- Update README.md for new features
-- Keep inline documentation current
+- Keep `README.md` accurate; it is the primary project documentation.
+- Document breaking or behavior-changing decisions in your PR description.
 
-### User Documentation
-- Update feature descriptions
-- Add screenshots for new UI elements
-- Update keyboard shortcuts
-- Document any breaking changes
+## Release Notes
 
-## Release Process
-
-### Version Numbering
-We follow semantic versioning (MAJOR.MINOR.PATCH):
-- **MAJOR**: Breaking changes
-- **MINOR**: New features (backward compatible)
-- **PATCH**: Bug fixes (backward compatible)
-
-### Release Checklist
-- [ ] All tests pass
-- [ ] Documentation updated
-- [ ] Version number updated
-- [ ] CHANGELOG.md updated
-- [ ] Release notes prepared
-
-## Areas for Contribution
-
-### High Priority
-- Bug fixes
-- Performance improvements
-- Accessibility enhancements
-- Documentation improvements
-
-### Medium Priority
-- New file operations
-- UI/UX improvements
-- Terminal enhancements
-- Search improvements
-
-### Low Priority
-- New themes
-- Plugin system
-- Advanced features
+No in-repo changelog file is required right now.
+When preparing a release, summarize notable changes in the GitHub release notes.
 
 ## Getting Help
 
-If you need help:
-1. Check the existing issues and discussions
-2. Ask questions in the discussions section
-3. Join our community chat (if available)
-4. Create an issue with the "question" label
+- Open an issue for questions, bugs, or proposals.
+- Provide enough context to reproduce and discuss efficiently.
 
-## Recognition
-
-Contributors will be recognized in:
-- CONTRIBUTORS.md file
-- Release notes
-- Project documentation
-
-Thank you for contributing to Folderium! 🎉
+Thanks for helping improve Folderium.

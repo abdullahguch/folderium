@@ -1,217 +1,97 @@
 # Folderium
 
-A native macOS file manager with dual-pane layout, inspired by Marta (but open-source). Built entirely in Swift and SwiftUI.
+Folderium is an open-source, native macOS file manager built with Swift and SwiftUI.
+It focuses on fast local file operations with a dual-pane workflow and zero telemetry.
 
-![Folderium Screenshot](https://folderium.com/screenshot.png)
+## Highlights
 
-## Features
+- Dual-pane file browsing with independent navigation per pane
+- Explorer-style familiarity mode (toggle in app settings)
+- Quick Access sidebar with favorites, recent folders, and mounted drives
+- Explorer-like navigation controls per pane (Back, Forward, Up, path bar)
+- Multi-window support (`Cmd + N` creates a new window)
+- File operations: copy, move, delete, move to Trash, create file/folder, rename
+- File conflict dialogs for copy/move/drop (`Replace`, `Keep Both`, `Skip`)
+- Keyboard convenience: `F2` rename for selected item
+- Search features: local filename search, regex search, file-content search, Spotlight search
+  - Includes token filters in pane search such as `ext:`, `type:`, `size>`, `size<`
+- Archive support with system tools:
+  - Create: ZIP, TAR, GZIP, BZIP2
+  - Extract/List: ZIP, TAR, GZIP, BZIP2
+  - 7Z/RAR/ISO/CAB/LZH currently return unsupported
+- Terminal integration:
+  - Built-in terminal window and command execution
+  - Directory synchronization support
+- Privacy-first by design: local operations only, no analytics in the app
 
-### 🗂️ Dual-Pane Interface
+## Requirements
 
--   **Two-pane layout** for efficient file management
--   **Resizable panes** with customizable proportions
--   **Active pane highlighting** with visual focus indicators
--   **Unlimited windows** support
+- macOS 14.0+
+- Xcode 15+ (for local development)
 
-### 🔍 Advanced Search
+## Quick Start
 
--   **Real-time filtering** as you type
--   **Per-pane search** - each pane has its own search field
--   **System-wide search** integration with macOS Spotlight
--   **Regex support** for advanced search patterns
+```bash
+git clone https://github.com/yourusername/folderium.git
+cd folderium
+open Folderium.xcodeproj
+```
 
-### 📁 File Operations
+Then run in Xcode with `Cmd + R`.
 
--   **Copy, Cut, Paste** with conflict resolution
--   **Drag & Drop** between panes
--   **Rename** with native macOS dialogs
--   **Delete** and **Move to Trash** with confirmation
--   **New File/Folder** creation with custom naming
--   **Context menus** for all file types
+## Build From CLI
 
-### 🗜️ Archive Support
+```bash
+xcodebuild -project Folderium.xcodeproj -scheme Folderium -configuration Debug build
+```
 
--   **Compress** multiple files into archives
--   **Extract** from various archive formats
--   **Supported formats**: ZIP, RAR, 7Z, XAR, TAR, GZIP, BZIP2, XZ, LZ, LZMA, Z, CAB, ISO, LZH
+## Project Scripts
 
-### 💻 Terminal Integration
+- Verify project/build health:
 
--   **Embedded terminal** below each pane
--   **Two-way directory sync** - terminal follows pane navigation
--   **Full terminal functionality** with command history
--   **External terminal** support
+  ```bash
+  ./scripts/verify_build.sh
+  ```
 
-### 🎨 Modern UI
+- Build distributable DMG:
 
--   **Native macOS design** following Apple's Human Interface Guidelines
--   **File type icons** with color coding
--   **Alternating row colors** for better readability
--   **Status bar** showing file/folder counts and total size
--   **Breadcrumb navigation** for easy path tracking
+  ```bash
+  ./scripts/build_dmg.sh
+  ```
 
-### ☁️ Cloud Storage Support
+## Project Structure
 
--   **OneDrive, Dropbox, Google Drive, iCloud** integration
--   **Symbolic link resolution** for cloud folders
--   **Special handling** for cloud storage directories
+```text
+folderium/
+├── Folderium/
+│   ├── FolderiumApp.swift
+│   ├── ContentView.swift
+│   ├── DualPaneView.swift
+│   └── Managers/
+│       ├── FileManager.swift
+│       ├── ArchiveManager.swift
+│       ├── SearchManager.swift
+│       └── TerminalManager.swift
+├── scripts/
+├── .github/workflows/build.yml
+├── README.md
+└── CONTRIBUTING.md
+```
 
-## Installation
+## Architecture Overview
 
-### Requirements
-
--   macOS 14.0 or later
--   Xcode 15.0 or later (for building from source)
-
-### Building from Source
-
-1. **Clone the repository**
-
-    ```bash
-    git clone https://github.com/yourusername/folderium.git
-    cd folderium
-    ```
-
-2. **Open in Xcode**
-
-    ```bash
-    open Folderium.xcodeproj
-    ```
-
-3. **Build and Run**
-    - Select your target device/simulator
-    - Press `Cmd + R` to build and run
-
-### Creating a DMG
-
-1. **Archive the app**
-
-    - In Xcode: Product → Archive
-    - Select the archive and click "Distribute App"
-    - Choose "Copy App" and save to a folder
-
-2. **Create DMG** (using create-dmg tool)
-    ```bash
-    brew install create-dmg
-    create-dmg --volname "Folderium" --window-pos 200 120 --window-size 600 300 --icon-size 100 --icon "Folderium.app" 175 120 --hide-extension "Folderium.app" --app-drop-link 425 120 "Folderium.dmg" "Folderium.app"
-    ```
-
-## Usage
-
-### Basic Navigation
-
--   **Double-click folders** to navigate into them
--   **Double-click files** to open with default application
--   **Right-click** for context menus
--   **Use breadcrumbs** to navigate back to parent directories
-
-### File Selection
-
--   **Single click** to select a file
--   **Command + Click** to toggle selection
--   **Shift + Click** to select a range
--   **Drag** to select multiple files
-
-### Search
-
--   **Type in search field** to filter files in real-time
--   **Each pane** has its own independent search
--   **Clear search** to show all files
-
-### Terminal
-
--   **Click terminal button** to show/hide embedded terminal
--   **Terminal automatically syncs** with current pane directory
--   **Use full terminal commands** for advanced operations
-
-## Keyboard Shortcuts
-
-| Shortcut       | Action                  |
-| -------------- | ----------------------- |
-| `Cmd + N`      | New Window              |
-| `Cmd + W`      | Close Window            |
-| `Cmd + Q`      | Quit Application        |
-| `Space`        | Compress Selected Files |
-| `Cmd + C`      | Copy Selected           |
-| `Cmd + X`      | Cut Selected            |
-| `Cmd + V`      | Paste                   |
-| `Delete`       | Move to Trash           |
-| `Cmd + Delete` | Delete Permanently      |
-
-## File Type Support
-
-### Icons & Colors
-
--   **Images**: Green folder icon (JPG, PNG, GIF, SVG, etc.)
--   **Documents**: Blue/Red icons (PDF, DOC, TXT, etc.)
--   **Code Files**: Purple icons (Swift, Python, JavaScript, etc.)
--   **Archives**: Brown archive icon (ZIP, RAR, 7Z, etc.)
--   **Media**: Pink/Purple icons (MP3, MP4, etc.)
--   **Folders**: Blue folder icons
--   **Symbolic Links**: Blue folder with plus badge
-
-## Architecture
-
-### Core Components
-
--   **DualPaneView**: Main dual-pane interface
--   **FilePaneView**: Individual pane implementation
--   **FileItem**: File representation model
--   **ArchiveManager**: Archive compression/extraction
--   **SearchManager**: File search functionality
--   **FileManager**: File system operations
-
-### Technologies Used
-
--   **SwiftUI**: Modern declarative UI framework
--   **AppKit**: Native macOS integration
--   **CoreSpotlight**: System-wide search integration
--   **Process**: Terminal integration
--   **FileManager**: File system operations
+- `FolderiumApp.swift`: app entry, window behavior, command menu integration
+- `ContentView.swift`: top-level layout (dual-pane area + preview pane)
+- `DualPaneView.swift`: core file browser UI/state and pane interactions
+- `Managers/FileManager.swift`: local filesystem operations
+- `Managers/ArchiveManager.swift`: archive create/extract/list using macOS CLI tools
+- `Managers/SearchManager.swift`: local, content, and Spotlight search
+- `Managers/TerminalManager.swift`: built-in terminal workflows
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-### Development Setup
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes
-4. Commit your changes: `git commit -m 'Add amazing feature'`
-5. Push to the branch: `git push origin feature/amazing-feature`
-6. Open a Pull Request
-
-## Roadmap
-
--   [ ] **Tabs support** for multiple directories per pane
--   [ ] **Bookmarks** for frequently accessed folders
--   [ ] **Split view** for file comparison
--   [ ] **Batch operations** for multiple files
--   [ ] **Custom themes** and appearance options
--   [ ] **Plugin system** for extensions
--   [ ] **FTP/SFTP** support
--   [ ] **File preview** pane
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
--   Inspired by [Marta](https://marta.sh/) file manager
--   Built with SwiftUI and native macOS technologies
--   Icons from SF Symbols
--   App icon from (https://www.svgrepo.com/svg/514322/folder)
-
-## Support
-
-If you encounter any issues or have questions:
-
-1. **Check the Issues** tab for existing problems
-2. **Create a new issue** with detailed information
-3. **Join our discussions** for community support
-
----
-
-**Folderium** - A modern file manager for macOS, built with ❤️ using Swift and SwiftUI.
+MIT — see [LICENSE](LICENSE).
