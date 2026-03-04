@@ -1,4 +1,6 @@
 import SwiftUI
+import AVKit
+import PDFKit
 
 struct ContentView: View {
     private let defaultPreviewWidthRatio: CGFloat = 0.22
@@ -43,7 +45,11 @@ struct ContentView: View {
                     // Dual pane content
                     DualPaneView(
                         onSelectionChange: { selection in
-                            selectedFiles = selection
+                            if isPreviewVisible {
+                                selectedFiles = selection
+                            } else if !selectedFiles.isEmpty {
+                                selectedFiles = []
+                            }
                         },
                         showNavigationPane: $isNavigationPaneVisible
                     )
@@ -179,6 +185,10 @@ struct FilePreviewItem: View {
     let file: URL
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
     @State private var image: NSImage?
+    @State private var pdfDocument: PDFDocument?
+    @State private var textPreview: String?
+    @State private var mediaPlayer: AVPlayer?
+    @State private var mediaKindLabel: String?
     @State private var isLoading = false
     @State private var errorMessage: String?
     
@@ -236,6 +246,32 @@ struct FilePreviewItem: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(maxHeight: 300)
                         .cornerRadius(8)
+                } else if let pdfDocument = pdfDocument {
+                    PDFPreviewView(document: pdfDocument)
+                        .frame(height: 360)
+                        .cornerRadius(8)
+                } else if let textPreview = textPreview {
+                    ScrollView {
+                        Text(textPreview)
+                            .font(.system(size: 12, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                            .padding(10)
+                    }
+                    .frame(height: 300)
+                    .background(FolderiumTheme.windowBackground(isSoftDark: softDarkThemeEnabled))
+                    .cornerRadius(8)
+                } else if let mediaPlayer = mediaPlayer {
+                    VStack(spacing: 8) {
+                        if let mediaKindLabel {
+                            Text(mediaKindLabel)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        VideoPlayer(player: mediaPlayer)
+                            .frame(height: 220)
+                            .cornerRadius(8)
+                    }
                 } else {
                     VStack {
                         Image(systemName: getFileIcon())
@@ -257,6 +293,9 @@ struct FilePreviewItem: View {
         .cornerRadius(12)
         .onAppear {
             loadPreview()
+        }
+        .onDisappear {
+            mediaPlayer?.pause()
         }
     }
     
@@ -293,11 +332,10 @@ struct FilePreviewItem: View {
     
     private func loadPreview() {
         let pathExtension = file.pathExtension.lowercased()
+        clearPreviewState()
         
-        // Only load image previews for now
         if ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "svg", "webp"].contains(pathExtension) {
             isLoading = true
-            errorMessage = nil
             
             DispatchQueue.global(qos: .userInitiated).async {
                 let loadedImage = NSImage(contentsOf: file)
@@ -311,7 +349,82 @@ struct FilePreviewItem: View {
                     }
                 }
             }
+            return
         }
+        
+        if pathExtension == "pdf" {
+            isLoading = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                let document = PDFDocument(url: file)
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    if let document {
+                        self.pdfDocument = document
+                    } else {
+                        self.errorMessage = "Could not load PDF preview"
+                    }
+                }
+            }
+            return
+        }
+        
+        if ["txt", "md", "json", "xml", "yaml", "yml", "csv", "log", "swift", "js", "ts", "tsx", "jsx", "py", "java", "c", "cpp", "h", "hpp", "rs", "go", "sh", "html", "css"].contains(pathExtension) {
+            isLoading = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let rawData = try Data(contentsOf: file, options: .mappedIfSafe)
+                    let maxBytes = min(rawData.count, 220_000)
+                    let sliced = rawData.prefix(maxBytes)
+                    let decoded = String(data: Data(sliced), encoding: .utf8)
+                        ?? String(decoding: sliced, as: UTF8.self)
+                    let limited = decoded.count > 16_000 ? String(decoded.prefix(16_000)) + "\n\n... (truncated)" : decoded
+                    
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                        self.textPreview = limited
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                        self.errorMessage = "Could not load text preview"
+                    }
+                }
+            }
+            return
+        }
+        
+        if ["mp4", "mov", "m4v", "avi", "mkv", "webm", "mp3", "wav", "aac", "flac", "m4a", "ogg"].contains(pathExtension) {
+            mediaPlayer = AVPlayer(url: file)
+            mediaKindLabel = ["mp3", "wav", "aac", "flac", "m4a", "ogg"].contains(pathExtension) ? "Audio Preview" : "Video Preview"
+            return
+        }
+    }
+    
+    private func clearPreviewState() {
+        image = nil
+        pdfDocument = nil
+        textPreview = nil
+        mediaPlayer?.pause()
+        mediaPlayer = nil
+        mediaKindLabel = nil
+        errorMessage = nil
+        isLoading = false
+    }
+}
+
+struct PDFPreviewView: NSViewRepresentable {
+    let document: PDFDocument
+    
+    func makeNSView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.displaysPageBreaks = true
+        view.displayMode = .singlePageContinuous
+        return view
+    }
+    
+    func updateNSView(_ nsView: PDFView, context: Context) {
+        nsView.document = document
     }
 }
 

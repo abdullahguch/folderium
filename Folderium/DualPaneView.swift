@@ -13,22 +13,6 @@ struct QuickLocation: Identifiable {
     let url: URL
 }
 
-struct DraggableModifier: ViewModifier {
-    let selection: Set<URL>
-    let dragPreview: () -> AnyView
-    
-    func body(content: Content) -> some View {
-        if selection.isEmpty {
-            content
-        } else {
-            content.draggable(selection.first!) {
-                dragPreview()
-            }
-        }
-    }
-}
-
-
 struct DualPaneView: View {
     private let defaultQuickAccessWidth: CGFloat = 190
     private let defaultPaneSplitRatio: CGFloat = 0.5
@@ -50,6 +34,7 @@ struct DualPaneView: View {
     @Binding var showNavigationPane: Bool
     @State private var showDeleteConfirmation: Bool = false
     @State private var filesToDelete: [URL] = []
+    @State private var deleteIntent: DeleteIntent = .permanent
     @State private var refreshTrigger: UUID = UUID()
     @State private var activePane: ActivePane = .left // Track which pane is currently active
     @State private var clipboardCheckTrigger: UUID = UUID() // To check clipboard state
@@ -64,9 +49,43 @@ struct DualPaneView: View {
     @State private var paneSplitRatio: CGFloat = 0.5
     @State private var sidebarDragStartWidth: CGFloat?
     @State private var paneSplitDragStartLeftWidth: CGFloat?
+    @State private var leftDisplayedURLs: [URL] = []
+    @State private var rightDisplayedURLs: [URL] = []
     @State private var shortcutMonitor: Any?
     @State private var hostingWindow: NSWindow?
     @State private var activeShortcutBindings: [ShortcutBinding] = ShortcutStore.defaultBindings
+    @State private var pinnedPaths: [String] = []
+    @State private var draggedPinnedPath: String?
+    @State private var undoStack: [FileMoveBatch] = []
+    @State private var redoStack: [FileMoveBatch] = []
+    
+    private enum DeleteIntent {
+        case trash
+        case permanent
+    }
+    
+    private struct FileMoveEntry: Hashable {
+        let from: URL
+        let to: URL
+    }
+    
+    private struct FileMoveBatch: Identifiable {
+        let id = UUID()
+        let title: String
+        let entries: [FileMoveEntry]
+    }
+    
+    private var activePaneSelection: Set<URL> {
+        activePane == .left ? leftSelection : rightSelection
+    }
+    
+    private var activePanePath: URL {
+        activePane == .left ? leftPath : rightPath
+    }
+    
+    private var canCreateFolderInActivePane: Bool {
+        FileManager.default.isWritableFile(atPath: activePanePath.path)
+    }
     
     // Callback to notify parent of selection changes
     var onSelectionChange: ((Set<URL>) -> Void)?
@@ -175,17 +194,15 @@ struct DualPaneView: View {
     }
     
     private var pinnedLocations: [QuickLocation] {
-        pinnedPathsRaw
-            .split(separator: "\n")
-            .map(String.init)
-            .compactMap { path in
-                guard !path.isEmpty else { return nil }
-                return QuickLocation(
-                    name: URL(fileURLWithPath: path).lastPathComponent.isEmpty ? path : URL(fileURLWithPath: path).lastPathComponent,
-                    icon: "pin",
-                    url: URL(fileURLWithPath: path)
-                )
-            }
+        pinnedPaths.compactMap { path in
+            guard !path.isEmpty else { return nil }
+            let url = URL(fileURLWithPath: path)
+            return QuickLocation(
+                name: url.lastPathComponent.isEmpty ? path : url.lastPathComponent,
+                icon: "pin",
+                url: url
+            )
+        }
     }
     
     var body: some View {
@@ -197,21 +214,29 @@ struct DualPaneView: View {
                 Divider().frame(height: 18)
                 
                 explorerToolbarButton("Copy", systemImage: "doc.on.doc", shortcutHint: toolbarShortcutText(for: .copySelected)) { copySelectedFiles() }
-                    .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                    .disabled(activePaneSelection.isEmpty)
                 explorerToolbarButton("Cut", systemImage: "scissors", shortcutHint: toolbarShortcutText(for: .cutSelected)) { cutSelectedFiles() }
-                    .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                    .disabled(activePaneSelection.isEmpty)
                 explorerToolbarButton("Paste", systemImage: "doc.on.clipboard", shortcutHint: toolbarShortcutText(for: .pasteIntoActivePane)) { pasteFiles() }
                     .disabled(!hasFilesInClipboard())
                     .onChange(of: clipboardCheckTrigger) { _, _ in }
+                explorerToolbarButton("New Folder", systemImage: "folder.badge.plus", shortcutHint: toolbarShortcutText(for: .newFolderInActivePane)) {
+                    createNewFolderInActivePane()
+                }
+                .disabled(!canCreateFolderInActivePane)
                 
                 Divider().frame(height: 18)
                 
                 explorerToolbarButton("Rename", systemImage: "pencil", shortcutHint: toolbarShortcutText(for: .renameSelected)) { renameSelectedItem() }
-                    .disabled((activePane == .left ? leftSelection : rightSelection).count != 1)
-                explorerToolbarButton("Delete", systemImage: "trash", shortcutHint: toolbarShortcutText(for: .deleteSelected)) { deleteSelectedFiles() }
-                    .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                    .disabled(activePaneSelection.count != 1)
+                explorerToolbarButton("Trash", systemImage: "trash", shortcutHint: toolbarShortcutText(for: .deleteSelected)) { trashSelectedFiles() }
+                    .disabled(activePaneSelection.isEmpty)
                 explorerToolbarButton("Compress", systemImage: "archivebox") { compressSelectedFiles() }
-                    .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+                    .disabled(activePaneSelection.isEmpty)
+                explorerToolbarButton("Undo", systemImage: "arrow.uturn.backward", shortcutHint: toolbarShortcutText(for: .undoLastOperation)) { undoLastOperation() }
+                    .disabled(undoStack.isEmpty)
+                explorerToolbarButton("Redo", systemImage: "arrow.uturn.forward", shortcutHint: toolbarShortcutText(for: .redoLastOperation)) { redoLastOperation() }
+                    .disabled(redoStack.isEmpty)
 
                 Divider().frame(height: 18)
 
@@ -309,6 +334,17 @@ struct DualPaneView: View {
                             onNavigateBack: { navigateBack(in: .left) },
                             onNavigateForward: { navigateForward(in: .left) },
                             onNavigateUp: { navigateUp(in: .left) },
+                            canPasteFromClipboard: { hasFilesInClipboard() },
+                            onPasteIntoPath: { destination in
+                                activePane = .left
+                                pasteFiles(destinationOverride: destination ?? leftPath)
+                            },
+                            onRecordMoveBatch: { title, pairs in
+                                recordMovedItemsBatch(title: title, pairs: pairs)
+                            },
+                            onDisplayedURLsChange: { urls in
+                                leftDisplayedURLs = urls
+                            },
                             onFocus: {
                                 activePane = .left
                             }
@@ -369,6 +405,17 @@ struct DualPaneView: View {
                             onNavigateBack: { navigateBack(in: .right) },
                             onNavigateForward: { navigateForward(in: .right) },
                             onNavigateUp: { navigateUp(in: .right) },
+                            canPasteFromClipboard: { hasFilesInClipboard() },
+                            onPasteIntoPath: { destination in
+                                activePane = .right
+                                pasteFiles(destinationOverride: destination ?? rightPath)
+                            },
+                            onRecordMoveBatch: { title, pairs in
+                                recordMovedItemsBatch(title: title, pairs: pairs)
+                            },
+                            onDisplayedURLsChange: { urls in
+                                rightDisplayedURLs = urls
+                            },
                             onFocus: {
                                 activePane = .right
                             }
@@ -389,16 +436,24 @@ struct DualPaneView: View {
         }
         .background(FolderiumTheme.windowBackground(isSoftDark: softDarkThemeEnabled))
         .background(WindowAccessor(window: $hostingWindow).frame(width: 0, height: 0))
-        .alert("Delete Files", isPresented: $showDeleteConfirmation) {
+        .alert(deleteIntent == .trash ? "Move to Trash" : "Delete Files", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                performDelete()
+            Button(deleteIntent == .trash ? "Move to Trash" : "Delete", role: .destructive) {
+                performSelectedDelete()
             }
         } message: {
             if filesToDelete.count == 1 {
-                Text("Are you sure you want to permanently delete '\(filesToDelete.first?.lastPathComponent ?? "")'? This action cannot be undone.")
+                if deleteIntent == .trash {
+                    Text("Move '\(filesToDelete.first?.lastPathComponent ?? "")' to Trash?")
+                } else {
+                    Text("Are you sure you want to permanently delete '\(filesToDelete.first?.lastPathComponent ?? "")'? This action cannot be undone.")
+                }
             } else {
-                Text("Are you sure you want to permanently delete \(filesToDelete.count) files? This action cannot be undone.")
+                if deleteIntent == .trash {
+                    Text("Move \(filesToDelete.count) selected items to Trash?")
+                } else {
+                    Text("Are you sure you want to permanently delete \(filesToDelete.count) files? This action cannot be undone.")
+                }
             }
         }
         .onAppear {
@@ -414,6 +469,8 @@ struct DualPaneView: View {
             if !didRestoreAnyBookmark {
                 promptForInitialDownloadsAccess()
             }
+            pinnedPaths = sanitizePinnedPaths(from: pinnedPathsRaw)
+            persistPinnedPaths()
             activeShortcutBindings = ShortcutStore.load(from: shortcutsRaw)
             startShortcutMonitor()
         }
@@ -424,6 +481,15 @@ struct DualPaneView: View {
             activeShortcutBindings = ShortcutStore.load(from: shortcutsRaw)
             // Reload monitor so updated shortcut bindings apply immediately.
             restartShortcutMonitor()
+        }
+        .onChange(of: pinnedPaths) { _, _ in
+            persistPinnedPaths()
+        }
+        .onChange(of: pinnedPathsRaw) { _, newValue in
+            let sanitized = sanitizePinnedPaths(from: newValue)
+            if sanitized != pinnedPaths {
+                pinnedPaths = sanitized
+            }
         }
     }
     
@@ -493,7 +559,7 @@ struct DualPaneView: View {
                             .padding(.horizontal, 10)
                             .padding(.bottom, 4)
                         
-                        ForEach(pinnedLocations) { location in
+                        ForEach(pinnedLocations, id: \.url.path) { location in
                             Button {
                                 navigateToLocation(location.url)
                             } label: {
@@ -509,6 +575,20 @@ struct DualPaneView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("Unpin") {
+                                    unpinLocation(location.url)
+                                }
+                            }
+                            .onDrag {
+                                draggedPinnedPath = location.url.path
+                                return NSItemProvider(object: location.url.path as NSString)
+                            }
+                            .onDrop(of: [UTType.plainText], delegate: PinnedLocationDropDelegate(
+                                targetPath: location.url.path,
+                                pinnedPaths: $pinnedPaths,
+                                draggedPath: $draggedPinnedPath
+                            ))
                         }
                         
                         Divider().padding(.vertical, 6)
@@ -752,9 +832,50 @@ struct DualPaneView: View {
     
     private func pinActiveFolder() {
         let current = (activePane == .left ? leftPath : rightPath).path
-        var entries = Set(pinnedPathsRaw.split(separator: "\n").map(String.init))
-        entries.insert(current)
-        pinnedPathsRaw = entries.sorted().joined(separator: "\n")
+        guard !current.isEmpty else { return }
+        if !pinnedPaths.contains(current) {
+            pinnedPaths.append(current)
+        }
+        persistPinnedPaths()
+    }
+    
+    private func unpinLocation(_ url: URL) {
+        pinnedPaths.removeAll { $0 == url.path }
+        persistPinnedPaths()
+    }
+    
+    private func persistPinnedPaths() {
+        let sanitized = sanitizePinnedPaths(pinnedPaths)
+        if sanitized != pinnedPaths {
+            pinnedPaths = sanitized
+            return
+        }
+        let encoded = sanitized.joined(separator: "\n")
+        if pinnedPathsRaw != encoded {
+            pinnedPathsRaw = encoded
+        }
+    }
+    
+    private func sanitizePinnedPaths(from rawValue: String) -> [String] {
+        sanitizePinnedPaths(rawValue.split(separator: "\n").map(String.init))
+    }
+    
+    private func sanitizePinnedPaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for path in paths {
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !seen.contains(trimmed) else { continue }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: trimmed, isDirectory: &isDirectory),
+                  isDirectory.boolValue,
+                  FileManager.default.isReadableFile(atPath: trimmed) else {
+                continue
+            }
+            seen.insert(trimmed)
+            result.append(trimmed)
+        }
+        return result
     }
 
     private func unmountVolume(_ url: URL) {
@@ -846,6 +967,7 @@ struct DualPaneView: View {
         let newURL = selectedURL.deletingLastPathComponent().appendingPathComponent(newName)
         do {
             try FileManager.default.moveItem(at: selectedURL, to: newURL)
+            recordMovedItemsBatch(title: "Rename", pairs: [(from: selectedURL, to: newURL)])
             refreshTrigger = UUID()
             if activePane == .left {
                 leftSelection = [newURL]
@@ -863,8 +985,8 @@ struct DualPaneView: View {
     }
     
     private func copySelectedFiles() {
-            let selectedFiles = Array(leftSelection.union(rightSelection))
-            print("Copy selected called with \(selectedFiles.count) files")
+            let selectedFiles = Array(activePaneSelection)
+            print("Copy selected called with \(selectedFiles.count) files from \(activePane == .left ? "left" : "right") pane")
             
             if !selectedFiles.isEmpty {
                 let pasteboard = NSPasteboard.general
@@ -893,8 +1015,8 @@ struct DualPaneView: View {
         }
         
         private func cutSelectedFiles() {
-            let selectedFiles = Array(leftSelection.union(rightSelection))
-            print("Cut selected called with \(selectedFiles.count) files")
+            let selectedFiles = Array(activePaneSelection)
+            print("Cut selected called with \(selectedFiles.count) files from \(activePane == .left ? "left" : "right") pane")
             
             if !selectedFiles.isEmpty {
                 let pasteboard = NSPasteboard.general
@@ -925,7 +1047,7 @@ struct DualPaneView: View {
             }
         }
         
-        private func pasteFiles() {
+        private func pasteFiles(destinationOverride: URL? = nil) {
             let pasteboard = NSPasteboard.general
             
             print("Paste called - checking clipboard contents")
@@ -936,13 +1058,14 @@ struct DualPaneView: View {
                 print("Found \(urls.count) file URLs in clipboard")
                 
                 if !urls.isEmpty {
-                    // Determine target directory (use the active pane)
-                    let targetDirectory = activePane == .left ? leftPath : rightPath
+                    // Determine target directory (explicit destination or active pane)
+                    let targetDirectory = destinationOverride ?? (activePane == .left ? leftPath : rightPath)
                     
                     print("Pasting \(urls.count) files to \(targetDirectory.path)")
                     
                     Task {
                         do {
+                            var movedPairs: [(from: URL, to: URL)] = []
                             for url in urls {
                                 let destinationURL = targetDirectory.appendingPathComponent(url.lastPathComponent)
                                 let finalDestinationURL = resolveConflictDestination(
@@ -955,6 +1078,7 @@ struct DualPaneView: View {
                                 if isCutOperation {
                                     // Move file
                                     try FileManager.default.moveItem(at: url, to: finalDestinationURL)
+                                    movedPairs.append((from: url, to: finalDestinationURL))
                                     print("Moved: \(url.lastPathComponent) to \(finalDestinationURL.lastPathComponent)")
                                 } else {
                                     // Copy file
@@ -966,6 +1090,9 @@ struct DualPaneView: View {
                             await MainActor.run {
                                 // Refresh both panes
                                 refreshTrigger = UUID()
+                                if isCutOperation, !movedPairs.isEmpty {
+                                    recordMovedItemsBatch(title: "Move via Paste", pairs: movedPairs)
+                                }
                                 
                                 // Reset cut operation after paste
                                 isCutOperation = false
@@ -1090,8 +1217,8 @@ struct DualPaneView: View {
         
         
         private func compressSelectedFiles() {
-            let selectedFiles = Array(leftSelection.union(rightSelection))
-            print("Bulk compress called with \(selectedFiles.count) files")
+            let selectedFiles = Array(activePaneSelection)
+            print("Bulk compress called with \(selectedFiles.count) files from \(activePane == .left ? "left" : "right") pane")
             print("Left selection: \(leftSelection.count) files")
             print("Right selection: \(rightSelection.count) files")
             
@@ -1126,29 +1253,106 @@ struct DualPaneView: View {
             }
         }
     
-    private func deleteSelectedFiles() {
-        filesToDelete = Array(leftSelection.union(rightSelection))
+    private func trashSelectedFiles() {
+        deleteIntent = .trash
+        filesToDelete = Array(activePaneSelection)
         if !filesToDelete.isEmpty {
             showDeleteConfirmation = true
         }
     }
     
-    private func performDelete() {
+    private func deleteSelectedFilesPermanently() {
+        deleteIntent = .permanent
+        filesToDelete = Array(activePaneSelection)
+        if !filesToDelete.isEmpty {
+            showDeleteConfirmation = true
+        }
+    }
+    
+    private func performSelectedDelete() {
         for fileURL in filesToDelete {
             do {
-                try FileManager.default.removeItem(at: fileURL)
+                switch deleteIntent {
+                case .trash:
+                    try FileManager.default.trashItem(at: fileURL, resultingItemURL: nil)
+                case .permanent:
+                    try FileManager.default.removeItem(at: fileURL)
+                }
             } catch {
                 print("Error deleting file \(fileURL.lastPathComponent): \(error)")
             }
         }
         
-        // Clear selections and refresh both panes
-        leftSelection.removeAll()
-        rightSelection.removeAll()
-        onSelectionChange?(Set<URL>())
+        // Clear selection in active pane only (operations are scoped to active pane).
+        if activePane == .left {
+            leftSelection.removeAll()
+            onSelectionChange?(leftSelection)
+        } else {
+            rightSelection.removeAll()
+            onSelectionChange?(rightSelection)
+        }
         
         // Trigger refresh of both panes
         refreshTrigger = UUID()
+    }
+    
+    private func recordMovedItemsBatch(title: String, pairs: [(from: URL, to: URL)]) {
+        let entries = pairs
+            .filter { $0.from != $0.to }
+            .map { FileMoveEntry(from: $0.from, to: $0.to) }
+        guard !entries.isEmpty else { return }
+        undoStack.append(FileMoveBatch(title: title, entries: entries))
+        redoStack.removeAll()
+    }
+    
+    private func undoLastOperation() {
+        guard let batch = undoStack.popLast() else { return }
+        Task {
+            var reversedPairs: [(from: URL, to: URL)] = []
+            for entry in batch.entries.reversed() {
+                do {
+                    try FileManager.default.moveItem(at: entry.to, to: entry.from)
+                    reversedPairs.append((from: entry.to, to: entry.from))
+                } catch {
+                    print("Undo failed for \(entry.to.lastPathComponent): \(error)")
+                }
+            }
+            
+            await MainActor.run {
+                if !reversedPairs.isEmpty {
+                    redoStack.append(batch)
+                    refreshTrigger = UUID()
+                } else {
+                    // Keep user action recoverable even if filesystem state changed unexpectedly.
+                    undoStack.append(batch)
+                }
+            }
+        }
+    }
+    
+    private func redoLastOperation() {
+        guard let batch = redoStack.popLast() else { return }
+        Task {
+            var reappliedPairs: [(from: URL, to: URL)] = []
+            for entry in batch.entries {
+                do {
+                    try FileManager.default.moveItem(at: entry.from, to: entry.to)
+                    reappliedPairs.append((from: entry.from, to: entry.to))
+                } catch {
+                    print("Redo failed for \(entry.from.lastPathComponent): \(error)")
+                }
+            }
+            
+            await MainActor.run {
+                if !reappliedPairs.isEmpty {
+                    undoStack.append(batch)
+                    refreshTrigger = UUID()
+                } else {
+                    // Keep user action recoverable even if filesystem state changed unexpectedly.
+                    redoStack.append(batch)
+                }
+            }
+        }
     }
 
     private func restartShortcutMonitor() {
@@ -1175,9 +1379,13 @@ struct DualPaneView: View {
             }
 
             if let responder = NSApp.keyWindow?.firstResponder as? NSTextView,
-               responder.isEditable,
-               !event.modifierFlags.contains(.command) {
-                return event
+               responder.isEditable {
+                if !event.modifierFlags.contains(.command) {
+                    return event
+                }
+                if shouldBypassShortcutInEditableContext(binding.action) {
+                    return event
+                }
             }
 
             performShortcutAction(binding.action)
@@ -1196,6 +1404,10 @@ struct DualPaneView: View {
         switch action {
         case .newWindow:
             (NSApp.delegate as? AppDelegate)?.openNewWindow()
+        case .selectAllInActivePane:
+            selectAllInActivePane()
+        case .newFolderInActivePane:
+            createNewFolderInActivePane()
         case .renameSelected:
             renameSelectedItem()
         case .copySelected:
@@ -1205,7 +1417,13 @@ struct DualPaneView: View {
         case .pasteIntoActivePane:
             pasteFiles()
         case .deleteSelected:
-            deleteSelectedFiles()
+            trashSelectedFiles()
+        case .deleteSelectedPermanently:
+            deleteSelectedFilesPermanently()
+        case .undoLastOperation:
+            undoLastOperation()
+        case .redoLastOperation:
+            redoLastOperation()
         case .compressSelected:
             compressSelectedFiles()
         case .refreshActivePane:
@@ -1218,6 +1436,58 @@ struct DualPaneView: View {
             navigateForward(in: activePane)
         case .navigateUpActivePane:
             navigateUp(in: activePane)
+        }
+    }
+    
+    private func shouldBypassShortcutInEditableContext(_ action: ShortcutAction) -> Bool {
+        switch action {
+        case .copySelected,
+             .cutSelected,
+             .pasteIntoActivePane,
+             .undoLastOperation,
+             .redoLastOperation:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    private func selectAllInActivePane() {
+        let urls = activePane == .left ? leftDisplayedURLs : rightDisplayedURLs
+        let selected = Set(urls)
+        if activePane == .left {
+            leftSelection = selected
+            onSelectionChange?(leftSelection)
+        } else {
+            rightSelection = selected
+            onSelectionChange?(rightSelection)
+        }
+    }
+    
+    private func createNewFolderInActivePane() {
+        let targetDirectory = activePane == .left ? leftPath : rightPath
+        let baseName = "New Folder"
+        var candidateName = baseName
+        var counter = 1
+        
+        while FileManager.default.fileExists(atPath: targetDirectory.appendingPathComponent(candidateName).path) {
+            candidateName = "\(baseName) \(counter)"
+            counter += 1
+        }
+        
+        let newFolderURL = targetDirectory.appendingPathComponent(candidateName)
+        do {
+            try FileManager.default.createDirectory(at: newFolderURL, withIntermediateDirectories: false)
+            if activePane == .left {
+                leftSelection = [newFolderURL]
+                onSelectionChange?(leftSelection)
+            } else {
+                rightSelection = [newFolderURL]
+                onSelectionChange?(rightSelection)
+            }
+            refreshTrigger = UUID()
+        } catch {
+            print("Error creating folder in active pane: \(error)")
         }
     }
 }
@@ -1242,6 +1512,10 @@ struct FilePaneView: View {
     let onNavigateBack: () -> Void
     let onNavigateForward: () -> Void
     let onNavigateUp: () -> Void
+    let canPasteFromClipboard: () -> Bool
+    let onPasteIntoPath: (URL?) -> Void
+    let onRecordMoveBatch: (_ title: String, _ pairs: [(from: URL, to: URL)]) -> Void
+    let onDisplayedURLsChange: ([URL]) -> Void
     let onFocus: () -> Void
     
     @State private var files: [FileItem] = []
@@ -1268,6 +1542,25 @@ struct FilePaneView: View {
     @State private var inlineRenameText: String = ""
     @State private var lastPlainClickURL: URL?
     @State private var lastPlainClickTimestamp: Date?
+    @State private var keyboardSelectionAnchor: URL?
+    @State private var keyboardSelectionFocus: URL?
+    @State private var isAdvancedSearchEnabled: Bool = false
+    @State private var advancedSearchQuery: String = ""
+    @State private var advancedSearchInContents: Bool = false
+    @State private var advancedSearchRegex: Bool = false
+    @State private var advancedSearchCaseSensitive: Bool = false
+    @State private var advancedSearchFileTypes: String = ""
+    @State private var advancedSearchResults: [SearchResult] = []
+    @State private var advancedSearchIsRunning: Bool = false
+    @State private var advancedSearchError: String?
+    @State private var advancedSearchTask: Task<Void, Never>?
+    @State private var advancedSelectedResult: URL?
+    private static let internalDragPrefix = "folderium-internal-drag-v1"
+    
+    private enum DragFileOperation: Equatable {
+        case move
+        case copy
+    }
     
     enum SortOrder: CaseIterable {
         case name, type, size, modified
@@ -1371,6 +1664,7 @@ struct FilePaneView: View {
             // Blue border for focused pane
             RoundedRectangle(cornerRadius: 0)
                 .stroke(isActive ? Color.accentColor : Color.clear, lineWidth: 1)
+                .allowsHitTesting(false)
         )
         .background(
             GeometryReader { geometry in
@@ -1396,6 +1690,13 @@ struct FilePaneView: View {
         .onChange(of: path) { _, _ in
             // Clear selection when path changes
             selection = []
+            keyboardSelectionAnchor = nil
+            keyboardSelectionFocus = nil
+            advancedSelectedResult = nil
+            if isAdvancedSearchEnabled {
+                advancedSearchResults = []
+                advancedSearchError = nil
+            }
             pathInput = path.path
             cancelInlineRename()
             loadFiles()
@@ -1423,6 +1724,14 @@ struct FilePaneView: View {
         .onChange(of: sortDirection) { _, _ in
             applyFiltersAndSorting()
         }
+        .onChange(of: isAdvancedSearchEnabled) { _, _ in
+            publishVisibleURLsForShortcuts()
+        }
+        .onChange(of: advancedSearchResults) { _, _ in
+            if isAdvancedSearchEnabled {
+                publishVisibleURLsForShortcuts()
+            }
+        }
         .onChange(of: columnLayoutRaw) { _, _ in
             loadColumnLayout()
         }
@@ -1438,6 +1747,7 @@ struct FilePaneView: View {
             stopDirectoryWatcher()
             searchDebounceTask?.cancel()
             watcherDebounceTask?.cancel()
+            advancedSearchTask?.cancel()
         }
     }
     
@@ -1458,27 +1768,65 @@ struct FilePaneView: View {
     
     @ViewBuilder
     private var searchFieldView: some View {
+        let activeSearchBinding = Binding<String>(
+            get: { isAdvancedSearchEnabled ? advancedSearchQuery : searchText },
+            set: { newValue in
+                if isAdvancedSearchEnabled {
+                    advancedSearchQuery = newValue
+                } else {
+                    searchText = newValue
+                }
+            }
+        )
+        
         HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
             
-            TextField("Search in \(title.lowercased())...", text: $searchText, onEditingChanged: { isEditing in
+            TextField(
+                isAdvancedSearchEnabled ? "Advanced search in \(path.lastPathComponent.isEmpty ? title.lowercased() : path.lastPathComponent)..." : "Search in \(title.lowercased())...",
+                text: activeSearchBinding,
+                onEditingChanged: { isEditing in
                 if isEditing {
                     onFocus()
                 }
             })
                 .textFieldStyle(.plain)
                 .onSubmit {
-                    performSearch()
+                    if isAdvancedSearchEnabled {
+                        runAdvancedSearch()
+                    } else {
+                        performSearch()
+                    }
                 }
-                .onChange(of: searchText) { _, _ in
+                .onChange(of: activeSearchBinding.wrappedValue) { _, _ in
                     onFocus()
                 }
             
-            if !searchText.isEmpty {
+            Button(isAdvancedSearchEnabled ? "Basic" : "Advanced") {
+                isAdvancedSearchEnabled.toggle()
+                if isAdvancedSearchEnabled {
+                    advancedSearchQuery = searchText
+                    advancedSearchResults = []
+                    advancedSearchError = nil
+                } else {
+                    advancedSearchTask?.cancel()
+                    advancedSearchIsRunning = false
+                }
+            }
+            .buttonStyle(.borderless)
+            
+            if !(isAdvancedSearchEnabled ? advancedSearchQuery : searchText).isEmpty {
                 Button("Clear") {
-                    searchText = ""
-                    isSearching = false
+                    if isAdvancedSearchEnabled {
+                        advancedSearchQuery = ""
+                        advancedSearchResults = []
+                        advancedSearchError = nil
+                        advancedSelectedResult = nil
+                    } else {
+                        searchText = ""
+                        isSearching = false
+                    }
                 }
                 .buttonStyle(.borderless)
             }
@@ -1600,7 +1948,9 @@ struct FilePaneView: View {
     
     @ViewBuilder
     private var fileListView: some View {
-        if isLoading {
+        if isAdvancedSearchEnabled {
+            advancedSearchResultsView
+        } else if isLoading {
             loadingView
         } else if let errorMessage = errorMessage {
             errorView(errorMessage)
@@ -1632,6 +1982,92 @@ struct FilePaneView: View {
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    @ViewBuilder
+    private var advancedSearchResultsView: some View {
+        VStack(spacing: 0) {
+            advancedSearchControls
+            Divider()
+            
+            if advancedSearchIsRunning {
+                VStack {
+                    ProgressView()
+                    Text("Searching...")
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let advancedSearchError {
+                errorView(advancedSearchError)
+            } else if advancedSearchResults.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 26))
+                        .foregroundColor(.secondary)
+                    Text("No search results")
+                        .foregroundColor(.secondary)
+                    Text("Try a different query or toggle content search.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(advancedSearchResults) { result in
+                            SearchResultRowView(
+                                result: result,
+                                isSelected: advancedSelectedResult == result.url,
+                                onSelect: {
+                                    advancedSelectedResult = result.url
+                                },
+                                onOpen: {
+                                    openSearchResult(result)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            
+            HStack {
+                Text("\(advancedSearchResults.count) result(s)")
+                    .font(paneTinyFont)
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(FolderiumTheme.controlBackground(isSoftDark: softDarkThemeEnabled))
+        }
+    }
+    
+    @ViewBuilder
+    private var advancedSearchControls: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                Toggle("Contents", isOn: $advancedSearchInContents)
+                Toggle("Regex", isOn: $advancedSearchRegex)
+                Toggle("Case Sensitive", isOn: $advancedSearchCaseSensitive)
+                Spacer()
+            }
+            .font(paneTinyFont)
+            
+            HStack(spacing: 8) {
+                TextField("File types (csv,txt,swift)", text: $advancedSearchFileTypes)
+                    .textFieldStyle(.roundedBorder)
+                    .font(paneTinyFont)
+                
+                Button("Search") {
+                    runAdvancedSearch()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(advancedSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(FolderiumTheme.windowBackground(isSoftDark: softDarkThemeEnabled))
     }
     
     @ViewBuilder
@@ -1819,7 +2255,8 @@ struct FilePaneView: View {
                     FileRowView(
                         file: file,
                         isSelected: selection.contains(file.url),
-                        currentSelection: selection,
+                        selectionCount: selection.count,
+                        isPartOfSelection: selection.contains(file.url),
                         isStriped: index % 2 == 1,
                         isInlineRenaming: inlineRenamingURL == file.url,
                         inlineRenameText: Binding(
@@ -1839,24 +2276,41 @@ struct FilePaneView: View {
                             loadFiles()
                             onRefresh()
                         },
+                        onRecordMoveBatch: onRecordMoveBatch,
+                        canPasteFromClipboard: canPasteFromClipboard(),
+                        onPasteIntoFolder: { folderURL in
+                            onPasteIntoPath(folderURL)
+                        },
                         onBulkCompress: onBulkCompress,
+                        onDropToFolder: { folderURL, providers in
+                            handleDrop(providers: providers, destinationFolder: folderURL)
+                        },
+                        selectedURLsProvider: {
+                            Array(selection).sorted { $0.path < $1.path }
+                        },
                         onFocus: onFocus
                     )
                 }
             }
         }
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            handleDrop(providers: providers)
+        .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { providers in
+            handleDrop(providers: providers, destinationFolder: nil)
         }
-        .modifier(DraggableModifier(selection: selection, dragPreview: createDragPreview))
         .contentShape(Rectangle())
         .clipped()
-        .onTapGesture {
-            onFocus()
-        }
+        // Keep pane focus behavior without stealing first-click selection from rows.
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                onFocus()
+            }
+        )
         .contextMenu {
             EmptyAreaContextMenu(
                 currentPath: path,
+                canPasteFromClipboard: canPasteFromClipboard(),
+                onPaste: {
+                    onPasteIntoPath(nil)
+                },
                 onFileOperation: { 
                     loadFiles()
                     onRefresh()
@@ -1994,6 +2448,12 @@ struct FilePaneView: View {
         }
 
         toggleSelectionWithModifier(url, isCommandPressed: isCommandPressed, isShiftPressed: isShiftPressed)
+        keyboardSelectionFocus = url
+        if !isCommandPressed && !isShiftPressed {
+            keyboardSelectionAnchor = url
+        } else if isShiftPressed, keyboardSelectionAnchor == nil {
+            keyboardSelectionAnchor = url
+        }
 
         guard !isCommandPressed, !isShiftPressed else {
             lastPlainClickURL = nil
@@ -2045,6 +2505,7 @@ struct FilePaneView: View {
 
         do {
             try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+            onRecordMoveBatch("Rename", [(from: sourceURL, to: destinationURL)])
             selection = [destinationURL]
             cancelInlineRename()
             loadFiles()
@@ -2066,16 +2527,20 @@ struct FilePaneView: View {
     }
     
     private func selectRange(to url: URL) {
-        guard let firstSelected = selection.first else {
+        guard let anchorURL = keyboardSelectionAnchor ?? selection.first else {
             selection = [url]
+            keyboardSelectionAnchor = url
+            keyboardSelectionFocus = url
             return
         }
         
         // Get all files in current directory
         let allFiles = files.map { $0.url }
-        guard let firstIndex = allFiles.firstIndex(of: firstSelected),
+        guard let firstIndex = allFiles.firstIndex(of: anchorURL),
               let lastIndex = allFiles.firstIndex(of: url) else {
             selection = [url]
+            keyboardSelectionAnchor = url
+            keyboardSelectionFocus = url
             return
         }
         
@@ -2084,6 +2549,8 @@ struct FilePaneView: View {
         let endIndex = max(firstIndex, lastIndex)
         let range = allFiles[startIndex...endIndex]
         selection = Set(range)
+        keyboardSelectionAnchor = anchorURL
+        keyboardSelectionFocus = url
     }
     
     private func handleDoubleClick(_ file: FileItem) {
@@ -2198,6 +2665,83 @@ struct FilePaneView: View {
         applyFiltersAndSorting()
     }
     
+    private func runAdvancedSearch() {
+        let query = advancedSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            advancedSearchResults = []
+            advancedSearchError = nil
+            return
+        }
+        
+        advancedSearchTask?.cancel()
+        advancedSearchIsRunning = true
+        advancedSearchError = nil
+        advancedSearchResults = []
+        advancedSelectedResult = nil
+        
+        let options = SearchOptions(
+            searchType: advancedSearchRegex ? .regex : .contains,
+            caseSensitive: advancedSearchCaseSensitive,
+            maxResults: 1000,
+            includeHidden: showHiddenFiles
+        )
+        
+        let fileTypes = advancedSearchFileTypes
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        
+        advancedSearchTask = Task {
+            do {
+                let results: [SearchResult]
+                if advancedSearchInContents {
+                    results = try await SearchManager.shared.runContentSearch(
+                        query: query,
+                        in: path,
+                        fileTypes: fileTypes,
+                        options: options
+                    )
+                } else {
+                    results = try await SearchManager.shared.runLocalSearch(
+                        query: query,
+                        in: path,
+                        options: options
+                    )
+                }
+                
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    advancedSearchResults = results.sorted {
+                        $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                    }
+                    advancedSearchIsRunning = false
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    advancedSearchError = error.localizedDescription
+                    advancedSearchIsRunning = false
+                }
+            }
+        }
+    }
+    
+    private func openSearchResult(_ result: SearchResult) {
+        onFocus()
+        if result.isDirectory {
+            path = result.url
+            selection = []
+            advancedSelectedResult = result.url
+            return
+        }
+        
+        path = result.url.deletingLastPathComponent()
+        selection = [result.url]
+        keyboardSelectionAnchor = result.url
+        keyboardSelectionFocus = result.url
+        advancedSelectedResult = result.url
+    }
+    
     private func applyFiltersAndSorting() {
         var result = files
         let searchTerm = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2213,19 +2757,62 @@ struct FilePaneView: View {
         }
         
         displayedFiles = result
+        publishVisibleURLsForShortcuts()
+    }
+    
+    private func publishVisibleURLsForShortcuts() {
+        if isAdvancedSearchEnabled {
+            onDisplayedURLsChange(advancedSearchResults.map(\.url))
+        } else {
+            onDisplayedURLsChange(displayedFiles.map(\.url))
+        }
     }
     
     private func moveSelectionByArrow(delta: Int) {
         guard !displayedFiles.isEmpty else { return }
         
         let orderedURLs = displayedFiles.map(\.url)
-        
-        if let current = selection.first, let currentIndex = orderedURLs.firstIndex(of: current) {
-            let nextIndex = min(max(currentIndex + delta, 0), orderedURLs.count - 1)
-            selection = [orderedURLs[nextIndex]]
+        let isShiftPressed = NSEvent.modifierFlags.contains(.shift)
+
+        let fallbackCurrent: URL = {
+            if let focus = keyboardSelectionFocus {
+                return focus
+            }
+            if let selected = selection.first {
+                return selected
+            }
+            return delta > 0 ? orderedURLs.first! : orderedURLs.last!
+        }()
+
+        guard let currentIndex = orderedURLs.firstIndex(of: fallbackCurrent) else {
+            let initial = delta > 0 ? orderedURLs.first! : orderedURLs.last!
+            selection = [initial]
+            keyboardSelectionAnchor = initial
+            keyboardSelectionFocus = initial
+            onFocus()
+            return
+        }
+
+        let nextIndex = min(max(currentIndex + delta, 0), orderedURLs.count - 1)
+        let nextURL = orderedURLs[nextIndex]
+
+        if isShiftPressed {
+            let anchor = keyboardSelectionAnchor ?? fallbackCurrent
+            if let anchorIndex = orderedURLs.firstIndex(of: anchor) {
+                let startIndex = min(anchorIndex, nextIndex)
+                let endIndex = max(anchorIndex, nextIndex)
+                selection = Set(orderedURLs[startIndex...endIndex])
+                keyboardSelectionAnchor = anchor
+                keyboardSelectionFocus = nextURL
+            } else {
+                selection = [nextURL]
+                keyboardSelectionAnchor = nextURL
+                keyboardSelectionFocus = nextURL
+            }
         } else {
-            let initialIndex = delta > 0 ? 0 : orderedURLs.count - 1
-            selection = [orderedURLs[initialIndex]]
+            selection = [nextURL]
+            keyboardSelectionAnchor = nextURL
+            keyboardSelectionFocus = nextURL
         }
         
         onFocus()
@@ -2331,18 +2918,34 @@ struct FilePaneView: View {
         return true
     }
     
-    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+    private func handleDrop(providers: [NSItemProvider], destinationFolder: URL?) -> Bool {
         print("Drop received with \(providers.count) providers")
+        let destinationURL = destinationFolder ?? path
         
         Task {
-            var sourceURLs: [URL] = []
+            var sourceURLs = Set<URL>()
+            var hasInternalPayload = false
             
             for provider in providers {
+                if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
+                    do {
+                        let item = try await provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil)
+                        if let text = plainText(from: item),
+                           let decodedURLs = decodeInternalDragPayload(text) {
+                            decodedURLs.forEach { sourceURLs.insert($0) }
+                            hasInternalPayload = true
+                            continue
+                        }
+                    } catch {
+                        print("Error loading plain-text drop payload: \(error)")
+                    }
+                }
+                
                 if provider.hasItemConformingToTypeIdentifier("public.file-url") {
                     do {
                         if let data = try await provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) as? Data,
                            let url = URL(dataRepresentation: data, relativeTo: nil) {
-                            sourceURLs.append(url)
+                            sourceURLs.insert(url)
                             print("Found file URL: \(url.lastPathComponent)")
                         }
                     } catch {
@@ -2353,34 +2956,79 @@ struct FilePaneView: View {
             
             if !sourceURLs.isEmpty {
                 await MainActor.run {
-                    // Determine if this is a move or copy operation
-                    let isMoveOperation = NSEvent.modifierFlags.contains(.option) // Option key = move
-                    print("Drop operation: \(isMoveOperation ? "Move" : "Copy")")
-                    
-                    // Perform the operation
-                    performDropOperation(sourceURLs: sourceURLs, isMove: isMoveOperation)
+                    let optionPressed = NSEvent.modifierFlags.contains(.option)
+                    // Internal drags default to move; external file drags default to copy.
+                    let operation: DragFileOperation
+                    if optionPressed {
+                        operation = hasInternalPayload ? .copy : .move
+                    } else {
+                        operation = hasInternalPayload ? .move : .copy
+                    }
+                    performDropOperation(
+                        sourceURLs: Array(sourceURLs),
+                        destinationFolder: destinationURL,
+                        operation: operation
+                    )
                 }
             }
         }
         
         return true
     }
+
+    private func plainText(from item: NSSecureCoding) -> String? {
+        if let string = item as? String {
+            return string
+        }
+        if let attributed = item as? NSAttributedString {
+            return attributed.string
+        }
+        if let data = item as? Data {
+            return String(data: data, encoding: .utf8)
+        }
+        return nil
+    }
+
+    private func decodeInternalDragPayload(_ text: String) -> [URL]? {
+        let lines = text.split(separator: "\n").map(String.init)
+        guard lines.first == Self.internalDragPrefix else { return nil }
+        let paths = lines.dropFirst().filter { !$0.isEmpty }
+        guard !paths.isEmpty else { return [] }
+        return paths.map { URL(fileURLWithPath: $0) }
+    }
     
-    private func performDropOperation(sourceURLs: [URL], isMove: Bool) {
-        print("Performing \(isMove ? "move" : "copy") operation with \(sourceURLs.count) files to \(path.path)")
+    private func performDropOperation(sourceURLs: [URL], destinationFolder: URL, operation: DragFileOperation) {
+        print("Performing \(operation == .move ? "move" : "copy") operation with \(sourceURLs.count) files to \(destinationFolder.path)")
         
         Task {
             do {
+                var movedPairs: [(from: URL, to: URL)] = []
                 for sourceURL in sourceURLs {
-                    let destinationURL = path.appendingPathComponent(sourceURL.lastPathComponent)
+                    let destinationURL = destinationFolder.appendingPathComponent(sourceURL.lastPathComponent)
+                    
+                    // Prevent invalid no-op/self/descendant moves.
+                    var isDirectory: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory) {
+                        if destinationURL.path == sourceURL.path {
+                            print("Skipping no-op move for \(sourceURL.lastPathComponent)")
+                            continue
+                        }
+                        if isDirectory.boolValue && destinationURL.path.hasPrefix(sourceURL.path + "/") {
+                            print("Skipping invalid move into descendant for \(sourceURL.lastPathComponent)")
+                            continue
+                        }
+                    }
+                    
                     guard let finalDestinationURL = await resolveDropConflict(sourceURL: sourceURL, destinationURL: destinationURL) else {
                         continue
                     }
                     
-                    if isMove {
+                    switch operation {
+                    case .move:
                         try FileManager.default.moveItem(at: sourceURL, to: finalDestinationURL)
+                        movedPairs.append((from: sourceURL, to: finalDestinationURL))
                         print("Moved: \(sourceURL.lastPathComponent) to \(finalDestinationURL.lastPathComponent)")
-                    } else {
+                    case .copy:
                         try FileManager.default.copyItem(at: sourceURL, to: finalDestinationURL)
                         print("Copied: \(sourceURL.lastPathComponent) to \(finalDestinationURL.lastPathComponent)")
                     }
@@ -2390,6 +3038,9 @@ struct FilePaneView: View {
                     // Refresh the file list
                     loadFiles()
                     onRefresh()
+                    if operation == .move, !movedPairs.isEmpty {
+                        onRecordMoveBatch("Move via Drag and Drop", movedPairs)
+                    }
                 }
                 
                 print("Drop operation completed successfully")
@@ -2571,6 +3222,37 @@ private struct ColumnReorderDropDelegate: DropDelegate {
     }
 }
 
+private struct PinnedLocationDropDelegate: DropDelegate {
+    let targetPath: String
+    @Binding var pinnedPaths: [String]
+    @Binding var draggedPath: String?
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedPath,
+              draggedPath != targetPath,
+              let fromIndex = pinnedPaths.firstIndex(of: draggedPath),
+              let toIndex = pinnedPaths.firstIndex(of: targetPath) else { return }
+
+        if pinnedPaths[toIndex] != draggedPath {
+            withAnimation(.easeInOut(duration: 0.12)) {
+                pinnedPaths.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
+            }
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let dropped = draggedPath != nil
+        draggedPath = nil
+        return dropped
+    }
+
+    func dropExited(info: DropInfo) {}
+}
+
 struct FileRowView: View {
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
     @AppStorage("folderium.globalFontSize") private var globalFontSize: Double = 12
@@ -2585,7 +3267,8 @@ struct FileRowView: View {
     
     let file: FileItem
     let isSelected: Bool
-    let currentSelection: Set<URL>
+    let selectionCount: Int
+    let isPartOfSelection: Bool
     let isStriped: Bool
     let isInlineRenaming: Bool
     @Binding var inlineRenameText: String
@@ -2597,8 +3280,14 @@ struct FileRowView: View {
     let onCommitInlineRename: () -> Void
     let onCancelInlineRename: () -> Void
     let onFileOperation: () -> Void
+    let onRecordMoveBatch: (_ title: String, _ pairs: [(from: URL, to: URL)]) -> Void
+    let canPasteFromClipboard: Bool
+    let onPasteIntoFolder: (URL) -> Void
     let onBulkCompress: () -> Void
+    let onDropToFolder: (URL?, [NSItemProvider]) -> Bool
+    let selectedURLsProvider: () -> [URL]
     let onFocus: () -> Void
+    private static let internalDragPrefix = "folderium-internal-drag-v1"
     
     private var backgroundColor: Color {
         if isSelected {
@@ -2623,44 +3312,51 @@ struct FileRowView: View {
         .padding(.vertical, 6)
         .background(backgroundColor)
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            TapGesture(count: 2)
-                .onEnded {
+        .overlay {
+            RowMouseCaptureView { event in
+                let modifierFlags = event.modifierFlags
+                let isCommandPressed = modifierFlags.contains(.command)
+                let isShiftPressed = modifierFlags.contains(.shift)
+                let shouldPreserveMultiSelection =
+                    !isCommandPressed &&
+                    !isShiftPressed &&
+                    selectionCount > 1 &&
+                    isPartOfSelection
+
+                if !shouldPreserveMultiSelection {
+                    onSelectWithModifiers(isCommandPressed, isShiftPressed)
+                }
+                onFocus()
+
+                if event.clickCount >= 2 {
                     onDoubleClick()
                 }
-        )
-        .onTapGesture(count: 1) {
-            // This handles both left and right clicks
-            let isCommandPressed = NSEvent.modifierFlags.contains(.command)
-            let isShiftPressed = NSEvent.modifierFlags.contains(.shift)
-            onSelectWithModifiers(isCommandPressed, isShiftPressed)
-            onFocus()
+            }
+        }
+        .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { providers in
+            // If dropped over a non-folder row, fall back to pane's current path.
+            onDropToFolder(file.isDirectory ? file.url : nil, providers)
         }
         .contextMenu {
             FileContextMenu(
                 file: file, 
-                currentSelection: currentSelection,
+                currentSelectionCount: selectionCount,
                 onFileOperation: onFileOperation, 
                 onSelect: {
                     onSelectWithModifiers(false, false)
                 },
+                onRecordMoveBatch: onRecordMoveBatch,
+                canPasteFromClipboard: canPasteFromClipboard,
+                onPasteIntoFolder: onPasteIntoFolder,
                 onBulkCompress: onBulkCompress
             )
         }
-        .draggable(file.url) {
-            // Visual representation during drag
-            HStack {
-                Image(systemName: file.iconName)
-                    .foregroundColor(file.iconColor)
-                    .symbolRenderingMode(.hierarchical)
-                Text(file.name)
-                    .font(.system(size: CGFloat(globalFontSize)))
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(FolderiumTheme.controlBackground(isSoftDark: softDarkThemeEnabled))
-            .cornerRadius(4)
-            .shadow(radius: 2)
+        .onDrag {
+            let draggedURLs = dragSelectionURLs()
+            let payload = Self.internalDragPrefix + "\n" + draggedURLs.map(\.path).joined(separator: "\n")
+            return NSItemProvider(object: payload as NSString)
+        } preview: {
+            dragPreview
         }
         .onAppear {
             if isInlineRenaming {
@@ -2747,6 +3443,136 @@ struct FileRowView: View {
                 .font(.system(size: CGFloat(globalFontSize)))
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    private func dragSelectionURLs() -> [URL] {
+        if isPartOfSelection, selectionCount > 0 {
+            return selectedURLsProvider()
+        }
+        return [file.url]
+    }
+
+    @ViewBuilder
+    private var dragPreview: some View {
+        let draggedURLs = dragSelectionURLs()
+        HStack(spacing: 8) {
+            Image(systemName: draggedURLs.count > 1 ? "doc.on.doc.fill" : file.iconName)
+                .foregroundColor(draggedURLs.count > 1 ? .blue : file.iconColor)
+                .symbolRenderingMode(.hierarchical)
+
+            if draggedURLs.count > 1 {
+                Text("\(draggedURLs.count) items")
+                    .font(.system(size: max(globalFontSize - 1, 11), weight: .semibold))
+            } else {
+                Text(file.name)
+                    .font(.system(size: max(globalFontSize - 1, 11), weight: .semibold))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(FolderiumTheme.controlBackground(isSoftDark: softDarkThemeEnabled))
+        .cornerRadius(8)
+        .shadow(color: .black.opacity(0.18), radius: 4, x: 0, y: 2)
+    }
+}
+
+private struct SearchResultRowView: View {
+    @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
+    @AppStorage("folderium.globalFontSize") private var globalFontSize: Double = 12
+    let result: SearchResult
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onOpen: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: result.isDirectory ? "folder.fill" : "doc")
+                    .foregroundColor(result.isDirectory ? .blue : .secondary)
+                    .frame(width: 16)
+                
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(result.name)
+                        .font(.system(size: CGFloat(globalFontSize)))
+                        .lineLimit(1)
+                    
+                    Text(result.url.path)
+                        .font(.system(size: CGFloat(max(globalFontSize - 2, 10))))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                
+                Spacer()
+                
+                if !result.isDirectory {
+                    Text(result.sizeString)
+                        .font(.system(size: CGFloat(max(globalFontSize - 2, 10))))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isSelected ? Color.accentColor.opacity(0.25) : Color.clear)
+            .contentShape(Rectangle())
+            .overlay {
+                RowMouseCaptureView { event in
+                    onSelect()
+                    if event.clickCount >= 2 {
+                        onOpen()
+                    }
+                }
+            }
+            
+            Divider()
+                .background(FolderiumTheme.separator(isSoftDark: softDarkThemeEnabled))
+        }
+    }
+}
+
+private struct RowMouseCaptureView: NSViewRepresentable {
+    let onMouseDown: (NSEvent) -> Void
+
+    func makeNSView(context: Context) -> MouseCaptureNSView {
+        let view = MouseCaptureNSView()
+        view.onMouseDown = onMouseDown
+        return view
+    }
+
+    func updateNSView(_ nsView: MouseCaptureNSView, context: Context) {
+        nsView.onMouseDown = onMouseDown
+    }
+
+    final class MouseCaptureNSView: NSView {
+        var onMouseDown: ((NSEvent) -> Void)?
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+            layer?.backgroundColor = NSColor.clear.cgColor
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            self
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            onMouseDown?(event)
+        }
+
+        // Let right-click pass through so SwiftUI context menus still work.
+        override func rightMouseDown(with event: NSEvent) {
+            nextResponder?.rightMouseDown(with: event)
         }
     }
 }
@@ -3053,13 +3879,23 @@ struct FileItem {
 
 struct FileContextMenu: View {
     let file: FileItem
-    let currentSelection: Set<URL>
+    let currentSelectionCount: Int
     let onFileOperation: () -> Void
     let onSelect: () -> Void
+    let onRecordMoveBatch: (_ title: String, _ pairs: [(from: URL, to: URL)]) -> Void
+    let canPasteFromClipboard: Bool
+    let onPasteIntoFolder: (URL) -> Void
     let onBulkCompress: () -> Void
     
     enum ActionType {
         case delete, moveToTrash
+    }
+    
+    private var openWithApplications: [URL] {
+        guard !file.isDirectory else { return [] }
+        return NSWorkspace.shared
+            .urlsForApplications(toOpen: file.url)
+            .filter { $0.pathExtension.lowercased() == "app" }
     }
     
     var body: some View {
@@ -3067,6 +3903,28 @@ struct FileContextMenu: View {
             Button("Open") {
                 onSelect()
                 openFile()
+            }
+            
+            if !file.isDirectory {
+                Menu("Open With") {
+                    if openWithApplications.isEmpty {
+                        Text("No compatible apps found")
+                    } else {
+                        ForEach(Array(openWithApplications.prefix(12)), id: \.path) { appURL in
+                            Button(displayName(for: appURL)) {
+                                onSelect()
+                                openFile(with: appURL)
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    Button("Other...") {
+                        onSelect()
+                        openFileWithOtherAppPicker()
+                    }
+                }
             }
             
             Button("Open in New Window") {
@@ -3087,10 +3945,17 @@ struct FileContextMenu: View {
                 copyPaths()
             }
             
+            if file.isDirectory {
+                Button("Paste Into Folder") {
+                    onPasteIntoFolder(file.url)
+                }
+                .disabled(!canPasteFromClipboard)
+            }
+            
             Divider()
             
-            Button(currentSelection.count > 1 ? "Compress Selected (\(currentSelection.count))" : "Compress") {
-                if currentSelection.count > 1 {
+            Button(currentSelectionCount > 1 ? "Compress Selected (\(currentSelectionCount))" : "Compress") {
+                if currentSelectionCount > 1 {
                     onBulkCompress()
                 } else {
                     compressFile()
@@ -3176,6 +4041,33 @@ struct FileContextMenu: View {
     
     private func openInNewWindow() {
         NSWorkspace.shared.open(file.url)
+    }
+    
+    private func openFile(with applicationURL: URL) {
+        let configuration = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.open([file.url], withApplicationAt: applicationURL, configuration: configuration) { _, error in
+            if let error {
+                print("Error opening file with selected app: \(error)")
+            }
+        }
+    }
+    
+    private func openFileWithOtherAppPicker() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.message = "Choose an application to open this file."
+        panel.prompt = "Open"
+        
+        if panel.runModal() == .OK, let appURL = panel.url {
+            openFile(with: appURL)
+        }
+    }
+    
+    private func displayName(for appURL: URL) -> String {
+        FileManager.default.displayName(atPath: appURL.path)
     }
     
     private func compressFile() {
@@ -3400,6 +4292,7 @@ struct FileContextMenu: View {
                 
                 do {
                     try FileManager.default.moveItem(at: file.url, to: newURL)
+                    onRecordMoveBatch("Rename", [(from: file.url, to: newURL)])
                     onFileOperation() // Refresh the file list
                 } catch {
                     // Show error alert
@@ -3519,6 +4412,8 @@ struct WindowAccessor: NSViewRepresentable {
 
 struct EmptyAreaContextMenu: View {
     let currentPath: URL
+    let canPasteFromClipboard: Bool
+    let onPaste: () -> Void
     let onFileOperation: () -> Void
     
     var body: some View {
@@ -3530,6 +4425,11 @@ struct EmptyAreaContextMenu: View {
             Button("New File") {
                 createNewFileWithDialog()
             }
+            
+            Button("Paste") {
+                onPaste()
+            }
+            .disabled(!canPasteFromClipboard)
             
             Divider()
             

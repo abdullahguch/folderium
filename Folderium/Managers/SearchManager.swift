@@ -116,6 +116,16 @@ class SearchManager: ObservableObject {
         }
     }
     
+    // MARK: - Stateless Search APIs
+    
+    func runLocalSearch(query: String, in directory: URL, options: SearchOptions = SearchOptions()) async throws -> [SearchResult] {
+        try await searchLocalFiles(query: query, in: directory, options: options)
+    }
+    
+    func runContentSearch(query: String, in directory: URL, fileTypes: [String] = [], options: SearchOptions = SearchOptions()) async throws -> [SearchResult] {
+        try await searchFileContents(query: query, in: directory, fileTypes: fileTypes, options: options)
+    }
+    
     private func searchLocalFiles(query: String, in directory: URL, options: SearchOptions) async throws -> [SearchResult] {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {

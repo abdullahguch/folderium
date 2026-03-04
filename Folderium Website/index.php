@@ -6,7 +6,7 @@
 		<title>Folderium - Modern File Manager for macOS</title>
 		<meta
 			name="description"
-			content="A native macOS dual-pane file manager with Explorer-style workflow, resizable panes, conflict dialogs, and native Terminal integration." />
+			content="A native macOS dual-pane file manager with Explorer-style interactions, multi-item drag and drop, advanced search, trash-first delete, Open With, and customizable shortcuts." />
 		<link rel="icon" type="image/svg+xml" href="folderium-logo.svg" />
 		<link rel="alternate icon" href="folderium-logo.svg" />
 		<script src="https://cdn.tailwindcss.com"></script>
@@ -134,8 +134,8 @@
 					</div>
 					<h1 class="text-4xl md:text-6xl font-bold text-gray-900 mb-6">Folderium</h1>
 					<p class="text-xl md:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto">
-						A native macOS file manager with dual-pane workflow and Windows Explorer-style interactions by
-						default. Built entirely with Swift and SwiftUI.
+						A native macOS file manager with dual-pane workflow, Explorer-style interactions, and fast
+						keyboard-first operations. Built entirely with Swift and SwiftUI.
 					</p>
 					<div class="flex flex-col sm:flex-row gap-4 justify-center">
 						<a
@@ -173,7 +173,8 @@
 						</div>
 						<h3 class="text-xl font-bold text-gray-900 mb-4">Dual-Pane Interface</h3>
 						<p class="text-gray-600">
-							Two-pane layout with active pane focus, keyboard navigation, and independent history.
+							Two-pane layout with active pane focus, keyboard navigation, independent history, and
+							Explorer-like one-click select / double-click open behavior.
 						</p>
 					</div>
 
@@ -184,8 +185,8 @@
 						</div>
 						<h3 class="text-xl font-bold text-gray-900 mb-4">Advanced Search</h3>
 						<p class="text-gray-600">
-							Real-time filtering with token filters like <code>ext:</code>, <code>type:</code>,
-							<code>size&gt;</code>, and <code>size&lt;</code>, plus Spotlight integration.
+							Basic and advanced search modes with optional content search, regex, case sensitivity,
+							file-type filters, and Spotlight/local search integration.
 						</p>
 					</div>
 
@@ -196,8 +197,9 @@
 						</div>
 						<h3 class="text-xl font-bold text-gray-900 mb-4">File Operations</h3>
 						<p class="text-gray-600">
-							Copy, cut, paste, rename, delete, drag & drop, and conflict dialogs with Replace, Keep
-							Both, and Skip.
+							Copy, cut, paste (including context-menu paste into folders), rename, and multi-item drag
+							& drop with move/copy semantics, trash-first delete with permanent delete option, undo/redo
+							for move and rename, and conflict handling.
 						</p>
 					</div>
 
@@ -220,8 +222,8 @@
 						</div>
 						<h3 class="text-xl font-bold text-gray-900 mb-4">Explorer-Style Workflow</h3>
 						<p class="text-gray-600">
-							Explorer-style toolbar and context menus, Quick Access/sidebar navigation, and Shift+F2
-							rename for easy switching from Windows.
+							Explorer-style toolbar/context menus, pinned quick-access locations, Open With menu,
+							active-pane scoped actions, and Windows-like Shift + Arrow range selection.
 						</p>
 					</div>
 
@@ -233,7 +235,8 @@
 						<h3 class="text-xl font-bold text-gray-900 mb-4">Resizable Workspace</h3>
 						<p class="text-gray-600">
 							Resize the preview pane, sidebar, left/right pane split, and file columns with draggable
-							splitters and double-click reset.
+							splitters and double-click reset, plus shortcut support (including customizable bindings
+							such as Cmd+A Select All and Cmd+Shift+N New Folder).
 						</p>
 					</div>
 				</div>

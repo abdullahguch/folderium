@@ -31,11 +31,16 @@ enum FolderiumTheme {
 
 enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     case newWindow
+    case selectAllInActivePane
+    case newFolderInActivePane
     case renameSelected
     case copySelected
     case cutSelected
     case pasteIntoActivePane
     case deleteSelected
+    case deleteSelectedPermanently
+    case undoLastOperation
+    case redoLastOperation
     case compressSelected
     case refreshActivePane
     case openTerminalActivePane
@@ -48,11 +53,16 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .newWindow: return "New Window"
+        case .selectAllInActivePane: return "Select All (Active Pane)"
+        case .newFolderInActivePane: return "New Folder (Active Pane)"
         case .renameSelected: return "Rename Selected Item"
         case .copySelected: return "Copy Selection"
         case .cutSelected: return "Cut Selection"
         case .pasteIntoActivePane: return "Paste Into Active Pane"
-        case .deleteSelected: return "Delete Selection"
+        case .deleteSelected: return "Move Selection to Trash"
+        case .deleteSelectedPermanently: return "Delete Selection Permanently"
+        case .undoLastOperation: return "Undo Last File Operation"
+        case .redoLastOperation: return "Redo Last File Operation"
         case .compressSelected: return "Compress Selection"
         case .refreshActivePane: return "Refresh Active Pane"
         case .openTerminalActivePane: return "Open Active Pane in Terminal"
@@ -76,11 +86,16 @@ enum ShortcutStore {
     static var defaultBindings: [ShortcutBinding] {
         [
             ShortcutBinding(action: .newWindow, combo: "cmd+n"),
+            ShortcutBinding(action: .selectAllInActivePane, combo: "cmd+a"),
+            ShortcutBinding(action: .newFolderInActivePane, combo: "cmd+shift+n"),
             ShortcutBinding(action: .renameSelected, combo: "shift+f2"),
             ShortcutBinding(action: .copySelected, combo: "cmd+c"),
             ShortcutBinding(action: .cutSelected, combo: "cmd+x"),
             ShortcutBinding(action: .pasteIntoActivePane, combo: "cmd+v"),
             ShortcutBinding(action: .deleteSelected, combo: "delete"),
+            ShortcutBinding(action: .deleteSelectedPermanently, combo: "shift+delete"),
+            ShortcutBinding(action: .undoLastOperation, combo: "cmd+z"),
+            ShortcutBinding(action: .redoLastOperation, combo: "cmd+shift+z"),
             ShortcutBinding(action: .compressSelected, combo: "space"),
             ShortcutBinding(action: .refreshActivePane, combo: "cmd+r"),
             ShortcutBinding(action: .openTerminalActivePane, combo: "cmd+t"),
@@ -104,16 +119,34 @@ enum ShortcutStore {
     }
 
     private static func migrateLegacyRenameShortcut(_ shortcuts: [ShortcutBinding]) -> [ShortcutBinding] {
-        shortcuts.map { shortcut in
+        var migrated = shortcuts.map { shortcut in
             guard shortcut.action == .renameSelected,
                   ShortcutParser.normalizedCombo(shortcut.combo) == "f2" else {
                 return shortcut
             }
 
-            var migrated = shortcut
-            migrated.combo = "shift+f2"
-            return migrated
+            var updated = shortcut
+            updated.combo = "shift+f2"
+            return updated
         }
+
+        if !migrated.contains(where: { $0.action == .deleteSelectedPermanently }) {
+            migrated.append(ShortcutBinding(action: .deleteSelectedPermanently, combo: "shift+delete"))
+        }
+        if !migrated.contains(where: { $0.action == .selectAllInActivePane }) {
+            migrated.append(ShortcutBinding(action: .selectAllInActivePane, combo: "cmd+a"))
+        }
+        if !migrated.contains(where: { $0.action == .newFolderInActivePane }) {
+            migrated.append(ShortcutBinding(action: .newFolderInActivePane, combo: "cmd+shift+n"))
+        }
+        if !migrated.contains(where: { $0.action == .undoLastOperation }) {
+            migrated.append(ShortcutBinding(action: .undoLastOperation, combo: "cmd+z"))
+        }
+        if !migrated.contains(where: { $0.action == .redoLastOperation }) {
+            migrated.append(ShortcutBinding(action: .redoLastOperation, combo: "cmd+shift+z"))
+        }
+
+        return migrated
     }
 
     static func save(_ shortcuts: [ShortcutBinding]) -> String {
