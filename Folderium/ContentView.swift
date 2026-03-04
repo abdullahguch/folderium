@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var selectedFiles: Set<URL> = []
     @State private var previewSelection: Set<URL> = []
     @State private var isPreviewVisible: Bool = true
+    @State private var isNavigationPaneVisible: Bool = true
     @State private var previewWidthRatio: CGFloat = 0.22
     @State private var previewDragStartWidth: CGFloat?
     @State private var previewUpdateTask: Task<Void, Never>?
@@ -12,7 +13,12 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Spacer()
+                Button(isNavigationPaneVisible ? "Hide Navigation" : "Show Navigation") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isNavigationPaneVisible.toggle()
+                    }
+                }
+                .buttonStyle(.bordered)
                 
                 Button(isPreviewVisible ? "Hide Preview" : "Show Preview") {
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -30,9 +36,12 @@ struct ContentView: View {
             GeometryReader { geometry in
                 HStack(spacing: 0) {
                     // Dual pane content
-                    DualPaneView(onSelectionChange: { selection in
-                        selectedFiles = selection
-                    })
+                    DualPaneView(
+                        onSelectionChange: { selection in
+                            selectedFiles = selection
+                        },
+                        showNavigationPane: $isNavigationPaneVisible
+                    )
                     .frame(width: isPreviewVisible ? geometry.size.width * (1 - previewWidthRatio) : geometry.size.width)
                     
                     if isPreviewVisible {

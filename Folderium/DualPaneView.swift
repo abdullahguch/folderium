@@ -30,7 +30,6 @@ struct DraggableModifier: ViewModifier {
 struct DualPaneView: View {
     private let defaultQuickAccessWidth: CGFloat = 220
     private let defaultPaneSplitRatio: CGFloat = 0.5
-    private let defaultTerminalHeight: CGFloat = 200
     @AppStorage("folderium.windowsFamiliarMode") private var windowsFamiliarMode: Bool = true
     @AppStorage("folderium.showWindowsOnboarding") private var showWindowsOnboarding: Bool = true
     @AppStorage("folderium.pinnedPaths") private var pinnedPathsRaw: String = ""
@@ -42,8 +41,7 @@ struct DualPaneView: View {
     @State private var rightSearchText: String = ""
     @State private var leftIsSearching: Bool = false
     @State private var rightIsSearching: Bool = false
-    @State private var showLeftTerminal: Bool = false
-    @State private var showRightTerminal: Bool = false
+    @Binding var showNavigationPane: Bool
     @State private var showDeleteConfirmation: Bool = false
     @State private var filesToDelete: [URL] = []
     @State private var refreshTrigger: UUID = UUID()
@@ -58,15 +56,19 @@ struct DualPaneView: View {
     @State private var isNavigatingRightHistory: Bool = false
     @State private var quickAccessWidth: CGFloat = 220
     @State private var paneSplitRatio: CGFloat = 0.5
-    @State private var leftTerminalHeight: CGFloat = 200
-    @State private var rightTerminalHeight: CGFloat = 200
     @State private var sidebarDragStartWidth: CGFloat?
     @State private var paneSplitDragStartLeftWidth: CGFloat?
-    @State private var leftTerminalDragStartHeight: CGFloat?
-    @State private var rightTerminalDragStartHeight: CGFloat?
     
     // Callback to notify parent of selection changes
     var onSelectionChange: ((Set<URL>) -> Void)?
+    
+    init(
+        onSelectionChange: ((Set<URL>) -> Void)? = nil,
+        showNavigationPane: Binding<Bool> = .constant(true)
+    ) {
+        self.onSelectionChange = onSelectionChange
+        self._showNavigationPane = showNavigationPane
+    }
     
     private var quickLocations: [QuickLocation] {
         let fileManager = FileManager.default
@@ -183,38 +185,42 @@ struct DualPaneView: View {
             GeometryReader { geometry in
                 let totalWidth = max(geometry.size.width, 500)
                 let clampedSidebarWidth = min(max(quickAccessWidth, 170), totalWidth * 0.45)
-                let remainingWidth = max(totalWidth - clampedSidebarWidth - 12, 300)
+                let sidebarWidth = showNavigationPane ? clampedSidebarWidth : 0
+                let sidebarSplitterWidth: CGFloat = showNavigationPane ? 6 : 0
+                let remainingWidth = max(totalWidth - sidebarWidth - sidebarSplitterWidth - 6, 300)
                 let clampedPaneSplit = min(max(paneSplitRatio, 0.2), 0.8)
                 let leftPaneWidth = max((remainingWidth - 6) * clampedPaneSplit, 150)
                 let rightPaneWidth = max((remainingWidth - 6) - leftPaneWidth, 150)
                 
                 HStack(spacing: 0) {
-                    quickAccessSidebar
-                        .frame(width: clampedSidebarWidth)
-                    
-                    Rectangle()
-                        .fill(Color(NSColor.separatorColor))
-                        .frame(width: 6)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 2)
-                                .onChanged { value in
-                                    if sidebarDragStartWidth == nil {
-                                        sidebarDragStartWidth = clampedSidebarWidth
+                    if showNavigationPane {
+                        quickAccessSidebar
+                            .frame(width: clampedSidebarWidth)
+                        
+                        Rectangle()
+                            .fill(Color(NSColor.separatorColor))
+                            .frame(width: 6)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 2)
+                                    .onChanged { value in
+                                        if sidebarDragStartWidth == nil {
+                                            sidebarDragStartWidth = clampedSidebarWidth
+                                        }
+                                        let base = sidebarDragStartWidth ?? clampedSidebarWidth
+                                        let proposed = base + value.translation.width
+                                        quickAccessWidth = min(max(proposed, 170), totalWidth * 0.45)
                                     }
-                                    let base = sidebarDragStartWidth ?? clampedSidebarWidth
-                                    let proposed = base + value.translation.width
-                                    quickAccessWidth = min(max(proposed, 170), totalWidth * 0.45)
+                                    .onEnded { _ in
+                                        sidebarDragStartWidth = nil
+                                    }
+                            )
+                            .onTapGesture(count: 2) {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    quickAccessWidth = defaultQuickAccessWidth
                                 }
-                                .onEnded { _ in
-                                    sidebarDragStartWidth = nil
-                                }
-                        )
-                        .onTapGesture(count: 2) {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                quickAccessWidth = defaultQuickAccessWidth
                             }
-                        }
+                    }
                     
                     VStack(spacing: 0) {
                         FilePaneView(
@@ -224,7 +230,7 @@ struct DualPaneView: View {
                             isSearching: $leftIsSearching,
                             title: "Left Pane",
                             isActive: activePane == .left,
-                            onTerminalToggle: { showLeftTerminal.toggle() },
+                            onOpenInTerminal: { openInTerminal(leftPath) },
                             onRefresh: { refreshTrigger = UUID() },
                             refreshTrigger: refreshTrigger,
                             onBulkCompress: compressSelectedFiles,
@@ -245,19 +251,6 @@ struct DualPaneView: View {
                             recordHistoryIfNeeded(for: .left, oldValue: oldValue, newValue: newValue)
                         }
                         
-                        if showLeftTerminal {
-                            terminalResizeHandle(
-                                height: $leftTerminalHeight,
-                                dragStartHeight: $leftTerminalDragStartHeight,
-                                maxHeight: geometry.size.height * 0.7,
-                                defaultHeight: defaultTerminalHeight
-                            )
-                            RealTerminalView(currentDirectory: leftPath)
-                                .frame(height: leftTerminalHeight)
-                                .onTapGesture {
-                                    activePane = .left
-                                }
-                        }
                     }
                     .frame(width: leftPaneWidth)
                     
@@ -295,7 +288,7 @@ struct DualPaneView: View {
                             isSearching: $rightIsSearching,
                             title: "Right Pane",
                             isActive: activePane == .right,
-                            onTerminalToggle: { showRightTerminal.toggle() },
+                            onOpenInTerminal: { openInTerminal(rightPath) },
                             onRefresh: { refreshTrigger = UUID() },
                             refreshTrigger: refreshTrigger,
                             onBulkCompress: compressSelectedFiles,
@@ -316,19 +309,6 @@ struct DualPaneView: View {
                             recordHistoryIfNeeded(for: .right, oldValue: oldValue, newValue: newValue)
                         }
                         
-                        if showRightTerminal {
-                            terminalResizeHandle(
-                                height: $rightTerminalHeight,
-                                dragStartHeight: $rightTerminalDragStartHeight,
-                                maxHeight: geometry.size.height * 0.7,
-                                defaultHeight: defaultTerminalHeight
-                            )
-                            RealTerminalView(currentDirectory: rightPath)
-                                .frame(height: rightTerminalHeight)
-                                .onTapGesture {
-                                    activePane = .right
-                                }
-                        }
                     }
                     .frame(width: rightPaneWidth)
                 }
@@ -339,12 +319,8 @@ struct DualPaneView: View {
             return .handled
         }
         .onKeyPress(.space) {
-            // Only handle space for compression if terminal is not focused
-            if !showLeftTerminal && !showRightTerminal {
-                compressSelectedFiles()
-                return .handled
-            }
-            return .ignored
+            compressSelectedFiles()
+            return .handled
         }
         .alert("Delete Files", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -531,38 +507,21 @@ struct DualPaneView: View {
         .buttonStyle(.bordered)
     }
     
-    @ViewBuilder
-    private func terminalResizeHandle(
-        height: Binding<CGFloat>,
-        dragStartHeight: Binding<CGFloat?>,
-        maxHeight: CGFloat,
-        defaultHeight: CGFloat
-    ) -> some View {
-        Rectangle()
-            .fill(Color(NSColor.separatorColor))
-            .frame(height: 6)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 2)
-                    .onChanged { value in
-                        if dragStartHeight.wrappedValue == nil {
-                            dragStartHeight.wrappedValue = height.wrappedValue
-                        }
-                        let base = dragStartHeight.wrappedValue ?? height.wrappedValue
-                        let proposed = base - value.translation.height
-                        height.wrappedValue = min(max(proposed, 120), max(120, maxHeight))
-                    }
-                    .onEnded { _ in
-                        dragStartHeight.wrappedValue = nil
-                    }
-            )
-            .onTapGesture(count: 2) {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    height.wrappedValue = defaultHeight
-                }
+    private func openInTerminal(_ directory: URL) {
+        guard let terminalURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
+            NSWorkspace.shared.open(directory)
+            return
+        }
+        
+        let configuration = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.open([directory], withApplicationAt: terminalURL, configuration: configuration) { _, error in
+            if let error {
+                print("Failed to open Terminal for directory \(directory.path): \(error.localizedDescription)")
+                NSWorkspace.shared.open(directory)
             }
+        }
     }
-    
+
     private func selectFolder(for pane: ActivePane) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -1008,7 +967,7 @@ struct FilePaneView: View {
     @Binding var isSearching: Bool
     let title: String
     let isActive: Bool
-    let onTerminalToggle: () -> Void
+    let onOpenInTerminal: () -> Void
     let onRefresh: () -> Void
     let refreshTrigger: UUID
     let onBulkCompress: () -> Void
@@ -1174,8 +1133,8 @@ struct FilePaneView: View {
     
     @ViewBuilder
     private var terminalButtonView: some View {
-        Button("Terminal") {
-            onTerminalToggle()
+        Button("Open in Terminal") {
+            onOpenInTerminal()
         }
         .buttonStyle(.bordered)
         .onTapGesture {
@@ -2715,250 +2674,6 @@ struct FileContextMenu: View {
             print("Error deleting file: \(error)")
         }
     }
-}
-
-// MARK: - Real Terminal View
-
-struct RealTerminalView: View {
-    let currentDirectory: URL
-    @State private var command: String = ""
-    @State private var output: String = ""
-    @State private var isExecuting: Bool = false
-    @State private var commandHistory: [String] = []
-    @State private var historyIndex: Int = -1
-    @State private var currentWorkingDirectory: URL
-    @FocusState private var isInputFocused: Bool
-    
-    init(currentDirectory: URL) {
-        self.currentDirectory = currentDirectory
-        self._currentWorkingDirectory = State(initialValue: currentDirectory)
-    }
-    
-    var body: some View {
-        VStack(spacing: 0) {
-                // Terminal header
-                HStack {
-                    Image(systemName: "terminal")
-                        .foregroundColor(.green)
-                    
-                    Text("Terminal")
-                        .font(.headline)
-                    
-                    Spacer()
-                    
-                    Text("PWD: \(currentWorkingDirectory.path)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .textSelection(.enabled)
-                }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(NSColor.controlBackgroundColor))
-            
-            Divider()
-            
-            // Terminal output + inline prompt
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(output)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        HStack(spacing: 6) {
-                            Text("$")
-                                .font(.system(.body, design: .monospaced))
-                            
-                            TextField("", text: $command, prompt: Text("Enter command...").foregroundColor(.green.opacity(0.55)))
-                                .font(.system(.body, design: .monospaced))
-                                .textFieldStyle(.plain)
-                                .focused($isInputFocused)
-                                .onSubmit {
-                                    executeCommand()
-                                }
-                                .onKeyPress(.upArrow) {
-                                    navigateHistory(up: true)
-                                    return .handled
-                                }
-                                .onKeyPress(.downArrow) {
-                                    navigateHistory(up: false)
-                                    return .handled
-                                }
-                                .onKeyPress { keyPress in
-                                    switch keyPress.key {
-                                    case .space:
-                                        return .ignored
-                                    case .upArrow:
-                                        navigateHistory(up: true)
-                                        return .handled
-                                    case .downArrow:
-                                        navigateHistory(up: false)
-                                        return .handled
-                                    case .return:
-                                        executeCommand()
-                                        return .handled
-                                    default:
-                                        return .ignored
-                                    }
-                                }
-                            
-                            if isExecuting {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .green))
-                            }
-                        }
-                        .id("terminal-inline-input")
-                    }
-                    .padding(8)
-                }
-                .background(Color.black)
-                .foregroundColor(.green)
-                .onTapGesture {
-                    isInputFocused = true
-                }
-                .onChange(of: output) { _, _ in
-                    proxy.scrollTo("terminal-inline-input", anchor: .bottom)
-                }
-                .onAppear {
-                    DispatchQueue.main.async {
-                        proxy.scrollTo("terminal-inline-input", anchor: .bottom)
-                    }
-                }
-            }
-        }
-        .onAppear {
-            output = "Terminal ready. Current directory: \(currentDirectory.path)\n"
-            currentWorkingDirectory = currentDirectory
-            // Focus the input field when terminal appears
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                isInputFocused = true
-            }
-        }
-    }
-    
-    private func executeCommand() {
-        guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        
-        let commandToExecute = command
-        commandHistory.append(commandToExecute)
-        historyIndex = commandHistory.count
-        
-        output += "$ \(commandToExecute)\n"
-        command = ""
-        isExecuting = true
-        
-        Task {
-            do {
-                let result = try await executeCommandInTerminal(commandToExecute, in: currentWorkingDirectory)
-                
-                await MainActor.run {
-                    if !result.output.isEmpty {
-                        output += result.output
-                    }
-                    if !result.error.isEmpty {
-                        output += "Error: \(result.error)"
-                    }
-                    if result.exitCode != 0 {
-                        output += "Exit code: \(result.exitCode)\n"
-                    }
-                    output += "\n"
-                    isExecuting = false
-                    
-                    // Update working directory if it changed
-                    if let newDir = result.newDirectory {
-                        currentWorkingDirectory = newDir
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    output += "Error executing command: \(error.localizedDescription)\n"
-                    isExecuting = false
-                }
-            }
-        }
-    }
-    
-    private func executeCommandInTerminal(_ command: String, in directory: URL) async throws -> TerminalResult {
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let process = Process()
-                    process.executableURL = URL(fileURLWithPath: "/bin/bash")
-                    process.arguments = ["-c", command]
-                    process.currentDirectoryURL = directory
-                    
-                    let outputPipe = Pipe()
-                    let errorPipe = Pipe()
-                    process.standardOutput = outputPipe
-                    process.standardError = errorPipe
-                    
-                    try process.run()
-                    process.waitUntilExit()
-                    
-                    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                    
-                    let output = String(data: outputData, encoding: .utf8) ?? ""
-                    let error = String(data: errorData, encoding: .utf8) ?? ""
-                    
-                    // Check if the command was a cd command and update directory
-                    var newDirectory: URL? = nil
-                    if command.hasPrefix("cd ") {
-                        let path = String(command.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
-                        if path == ".." {
-                            newDirectory = directory.deletingLastPathComponent()
-                        } else if path.hasPrefix("/") {
-                            newDirectory = URL(fileURLWithPath: path)
-                        } else if !path.isEmpty {
-                            newDirectory = directory.appendingPathComponent(path)
-                        }
-                    }
-                    
-                    let result = TerminalResult(
-                        command: command,
-                        output: output,
-                        error: error,
-                        exitCode: process.terminationStatus,
-                        newDirectory: newDirectory
-                    )
-                    
-                    continuation.resume(returning: result)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-    
-    private func navigateHistory(up: Bool) {
-        guard !commandHistory.isEmpty else { return }
-        
-        if up {
-            if historyIndex > 0 {
-                historyIndex -= 1
-                command = commandHistory[historyIndex]
-            }
-        } else {
-            if historyIndex < commandHistory.count - 1 {
-                historyIndex += 1
-                command = commandHistory[historyIndex]
-            } else {
-                historyIndex = commandHistory.count
-                command = ""
-            }
-        }
-    }
-    
-}
-
-struct TerminalResult {
-    let command: String
-    let output: String
-    let error: String
-    let exitCode: Int32
-    let newDirectory: URL?
 }
 
 struct DetailedFileInfo {

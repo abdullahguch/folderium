@@ -20,8 +20,7 @@ It focuses on fast local file operations with a dual-pane workflow and zero tele
   - Extract/List: ZIP, TAR, GZIP, BZIP2
   - 7Z/RAR/ISO/CAB/LZH currently return unsupported
 - Terminal integration:
-  - Built-in terminal window and command execution
-  - Directory synchronization support
+  - Open current folder directly in macOS Terminal
 - Privacy-first by design: local operations only, no analytics in the app
 
 ## Requirements
@@ -86,7 +85,7 @@ folderium/
 - `Managers/FileManager.swift`: local filesystem operations
 - `Managers/ArchiveManager.swift`: archive create/extract/list using macOS CLI tools
 - `Managers/SearchManager.swift`: local, content, and Spotlight search
-- `Managers/TerminalManager.swift`: built-in terminal workflows
+- `Managers/TerminalManager.swift`: native Terminal launch integration
 
 ## Contributing
 
