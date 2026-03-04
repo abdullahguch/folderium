@@ -2757,71 +2757,76 @@ struct RealTerminalView: View {
             
             Divider()
             
-            // Terminal output
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(output)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(8)
-            }
-            .background(Color.black)
-            .foregroundColor(.green)
-            
-            Divider()
-            
-            // Command input
-            HStack {
-                Text("$")
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundColor(.green)
-                
-                TextField("Enter command...", text: $command)
-                    .font(.system(.body, design: .monospaced))
-                    .textFieldStyle(.plain)
-                    .focused($isInputFocused)
-                    .onSubmit {
-                        executeCommand()
-                    }
-                    .onKeyPress(.upArrow) {
-                        navigateHistory(up: true)
-                        return .handled
-                    }
-                    .onKeyPress(.downArrow) {
-                        navigateHistory(up: false)
-                        return .handled
-                    }
-                    .onKeyPress { keyPress in
-                        // Handle all key presses in the terminal input
-                        switch keyPress.key {
-                        case .space:
-                            // Allow space key to be typed normally
-                            return .ignored
-                        case .upArrow:
-                            navigateHistory(up: true)
-                            return .handled
-                        case .downArrow:
-                            navigateHistory(up: false)
-                            return .handled
-                        case .return:
-                            executeCommand()
-                            return .handled
-                        default:
-                            // Allow all other keys to be typed normally
-                            return .ignored
+            // Terminal output + inline prompt
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(output)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        HStack(spacing: 6) {
+                            Text("$")
+                                .font(.system(.body, design: .monospaced))
+                            
+                            TextField("", text: $command, prompt: Text("Enter command...").foregroundColor(.green.opacity(0.55)))
+                                .font(.system(.body, design: .monospaced))
+                                .textFieldStyle(.plain)
+                                .focused($isInputFocused)
+                                .onSubmit {
+                                    executeCommand()
+                                }
+                                .onKeyPress(.upArrow) {
+                                    navigateHistory(up: true)
+                                    return .handled
+                                }
+                                .onKeyPress(.downArrow) {
+                                    navigateHistory(up: false)
+                                    return .handled
+                                }
+                                .onKeyPress { keyPress in
+                                    switch keyPress.key {
+                                    case .space:
+                                        return .ignored
+                                    case .upArrow:
+                                        navigateHistory(up: true)
+                                        return .handled
+                                    case .downArrow:
+                                        navigateHistory(up: false)
+                                        return .handled
+                                    case .return:
+                                        executeCommand()
+                                        return .handled
+                                    default:
+                                        return .ignored
+                                    }
+                                }
+                            
+                            if isExecuting {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .green))
+                            }
                         }
+                        .id("terminal-inline-input")
                     }
-                
-                if isExecuting {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                        .progressViewStyle(CircularProgressViewStyle(tint: .green))
+                    .padding(8)
+                }
+                .background(Color.black)
+                .foregroundColor(.green)
+                .onTapGesture {
+                    isInputFocused = true
+                }
+                .onChange(of: output) { _, _ in
+                    proxy.scrollTo("terminal-inline-input", anchor: .bottom)
+                }
+                .onAppear {
+                    DispatchQueue.main.async {
+                        proxy.scrollTo("terminal-inline-input", anchor: .bottom)
+                    }
                 }
             }
-            .padding(8)
-            .background(Color(NSColor.controlBackgroundColor))
         }
         .onAppear {
             output = "Terminal ready. Current directory: \(currentDirectory.path)\n"
