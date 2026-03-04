@@ -1,4 +1,5 @@
 import SwiftUI
+import Darwin
 
 enum ActivePane {
     case left, right
@@ -986,6 +987,8 @@ struct FilePaneView: View {
     @State private var sortDirection: SortDirection = .ascending
     @State private var pathInput: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
+    @State private var directoryWatcher: DirectoryWatcher?
+    @State private var watcherDebounceTask: Task<Void, Never>?
     
     enum SortOrder: CaseIterable {
         case name, type, size, modified
@@ -1044,12 +1047,14 @@ struct FilePaneView: View {
         .onAppear {
             pathInput = path.path
             loadFiles()
+            startDirectoryWatcher()
         }
         .onChange(of: path) { _, _ in
             // Clear selection when path changes
             selection = []
             pathInput = path.path
             loadFiles()
+            startDirectoryWatcher()
         }
         .onChange(of: searchText) { _, _ in
             searchDebounceTask?.cancel()
@@ -1078,12 +1083,18 @@ struct FilePaneView: View {
             moveSelectionByArrow(delta: -1)
             return .handled
         }
+        .onDisappear {
+            stopDirectoryWatcher()
+            searchDebounceTask?.cancel()
+            watcherDebounceTask?.cancel()
+        }
     }
     
     @ViewBuilder
     private var searchBarView: some View {
         HStack {
             searchFieldView
+            autoRefreshIndicator
             Spacer()
             terminalButtonView
         }
@@ -1093,6 +1104,23 @@ struct FilePaneView: View {
         .onTapGesture {
             onFocus()
         }
+    }
+    
+    @ViewBuilder
+    private var autoRefreshIndicator: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(Color.green)
+                .frame(width: 6, height: 6)
+            Text("Auto-refresh")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(6)
+        .help("Folder updates are watched automatically.")
     }
     
     @ViewBuilder
@@ -1618,6 +1646,31 @@ struct FilePaneView: View {
         }
         
         onFocus()
+    }
+    
+    private func startDirectoryWatcher() {
+        stopDirectoryWatcher()
+        
+        directoryWatcher = DirectoryWatcher(directoryURL: path) {
+            Task { @MainActor in
+                scheduleFilesystemRefresh()
+            }
+        }
+        directoryWatcher?.start()
+    }
+    
+    private func stopDirectoryWatcher() {
+        directoryWatcher?.stop()
+        directoryWatcher = nil
+    }
+    
+    private func scheduleFilesystemRefresh() {
+        watcherDebounceTask?.cancel()
+        watcherDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled else { return }
+            loadFiles()
+        }
     }
     
     private func matchesSearch(file: FileItem, query: String) -> Bool {
@@ -2690,6 +2743,54 @@ struct DetailedFileInfo {
     let isReadable: Bool
     let isWritable: Bool
     let isExecutable: Bool
+}
+
+final class DirectoryWatcher {
+    private let directoryURL: URL
+    private let onChange: () -> Void
+    private var source: DispatchSourceFileSystemObject?
+    private var fileDescriptor: CInt = -1
+    
+    init(directoryURL: URL, onChange: @escaping () -> Void) {
+        self.directoryURL = directoryURL
+        self.onChange = onChange
+    }
+    
+    func start() {
+        stop()
+        
+        fileDescriptor = open(directoryURL.path, O_EVTONLY)
+        guard fileDescriptor >= 0 else { return }
+        
+        let queue = DispatchQueue(label: "folderium.directory-watcher", qos: .utility)
+        source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fileDescriptor,
+            eventMask: [.write, .delete, .rename, .attrib, .extend, .link, .revoke],
+            queue: queue
+        )
+        
+        source?.setEventHandler { [weak self] in
+            self?.onChange()
+        }
+        
+        source?.setCancelHandler { [fileDescriptor] in
+            if fileDescriptor >= 0 {
+                close(fileDescriptor)
+            }
+        }
+        
+        source?.resume()
+    }
+    
+    func stop() {
+        source?.cancel()
+        source = nil
+        fileDescriptor = -1
+    }
+    
+    deinit {
+        stop()
+    }
 }
 
 // MARK: - Empty Area Context Menu
