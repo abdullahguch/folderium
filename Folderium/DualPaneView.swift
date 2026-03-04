@@ -30,13 +30,15 @@ struct DraggableModifier: ViewModifier {
 
 
 struct DualPaneView: View {
-    private let defaultQuickAccessWidth: CGFloat = 220
+    private let defaultQuickAccessWidth: CGFloat = 190
     private let defaultPaneSplitRatio: CGFloat = 0.5
     @AppStorage("folderium.windowsFamiliarMode") private var windowsFamiliarMode: Bool = true
     @AppStorage("folderium.showWindowsOnboarding") private var showWindowsOnboarding: Bool = true
     @AppStorage("folderium.pinnedPaths") private var pinnedPathsRaw: String = ""
+    @AppStorage("folderium.filePaneColumnsLayout") private var columnLayoutRaw: String = ""
     @AppStorage(ShortcutStore.storageKey) private var shortcutsRaw: String = ""
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
+    @AppStorage("folderium.showHiddenFiles") private var showHiddenFiles: Bool = false
     @State private var leftPath: URL = SandboxAccessManager.defaultDirectory
     @State private var rightPath: URL = SandboxAccessManager.defaultDirectory
     @State private var leftSelection: Set<URL> = []
@@ -58,7 +60,7 @@ struct DualPaneView: View {
     @State private var rightForwardHistory: [URL] = []
     @State private var isNavigatingLeftHistory: Bool = false
     @State private var isNavigatingRightHistory: Bool = false
-    @State private var quickAccessWidth: CGFloat = 220
+    @State private var quickAccessWidth: CGFloat = 190
     @State private var paneSplitRatio: CGFloat = 0.5
     @State private var sidebarDragStartWidth: CGFloat?
     @State private var paneSplitDragStartLeftWidth: CGFloat?
@@ -106,6 +108,55 @@ struct DualPaneView: View {
             let name = (try? url.resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? url.lastPathComponent
             return QuickLocation(name: name, icon: "externaldrive", url: url)
         }
+    }
+
+    private struct ToolbarColumnsLayout: Codable {
+        var order: [String]
+        var hidden: [String]
+        var widths: [String: Double]
+    }
+
+    private var defaultToolbarLayout: ToolbarColumnsLayout {
+        ToolbarColumnsLayout(
+            order: FilePaneView.FileColumn.defaultOrder.map(\.rawValue),
+            hidden: FilePaneView.FileColumn.defaultHidden.map(\.rawValue),
+            widths: Dictionary(
+                uniqueKeysWithValues: FilePaneView.FileColumn.defaultWidths.map { ($0.key.rawValue, Double($0.value)) }
+            )
+        )
+    }
+
+    private func loadToolbarColumnsLayout() -> ToolbarColumnsLayout {
+        guard !columnLayoutRaw.isEmpty, let data = columnLayoutRaw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(ToolbarColumnsLayout.self, from: data) else {
+            return defaultToolbarLayout
+        }
+        return decoded
+    }
+
+    private func saveToolbarColumnsLayout(_ layout: ToolbarColumnsLayout) {
+        guard let data = try? JSONEncoder().encode(layout) else { return }
+        columnLayoutRaw = String(data: data, encoding: .utf8) ?? ""
+    }
+
+    private func toolbarColumnHidden(_ column: FilePaneView.FileColumn) -> Bool {
+        loadToolbarColumnsLayout().hidden.contains(column.rawValue)
+    }
+
+    private func toggleToolbarColumnVisibility(_ column: FilePaneView.FileColumn) {
+        var layout = loadToolbarColumnsLayout()
+        var hidden = Set(layout.hidden)
+        if hidden.contains(column.rawValue) {
+            hidden.remove(column.rawValue)
+        } else {
+            hidden.insert(column.rawValue)
+        }
+        layout.hidden = Array(hidden)
+        saveToolbarColumnsLayout(layout)
+    }
+
+    private func resetToolbarColumns() {
+        saveToolbarColumnsLayout(defaultToolbarLayout)
     }
     
     private var recentLocations: [QuickLocation] {
@@ -164,22 +215,52 @@ struct DualPaneView: View {
                 
                 Divider().frame(height: 18)
                 
-                explorerToolbarButton("Copy", systemImage: "doc.on.doc") { copySelectedFiles() }
+                explorerToolbarButton("Copy", systemImage: "doc.on.doc", shortcutHint: toolbarShortcutText(for: .copySelected)) { copySelectedFiles() }
                     .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
-                explorerToolbarButton("Cut", systemImage: "scissors") { cutSelectedFiles() }
+                explorerToolbarButton("Cut", systemImage: "scissors", shortcutHint: toolbarShortcutText(for: .cutSelected)) { cutSelectedFiles() }
                     .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
-                explorerToolbarButton("Paste", systemImage: "doc.on.clipboard") { pasteFiles() }
+                explorerToolbarButton("Paste", systemImage: "doc.on.clipboard", shortcutHint: toolbarShortcutText(for: .pasteIntoActivePane)) { pasteFiles() }
                     .disabled(!hasFilesInClipboard())
                     .onChange(of: clipboardCheckTrigger) { _, _ in }
                 
                 Divider().frame(height: 18)
                 
-                explorerToolbarButton("Rename", systemImage: "pencil") { renameSelectedItem() }
+                explorerToolbarButton("Rename", systemImage: "pencil", shortcutHint: toolbarShortcutText(for: .renameSelected)) { renameSelectedItem() }
                     .disabled((activePane == .left ? leftSelection : rightSelection).count != 1)
-                explorerToolbarButton("Delete", systemImage: "trash") { deleteSelectedFiles() }
+                explorerToolbarButton("Delete", systemImage: "trash", shortcutHint: toolbarShortcutText(for: .deleteSelected)) { deleteSelectedFiles() }
                     .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
                 explorerToolbarButton("Compress", systemImage: "archivebox") { compressSelectedFiles() }
                     .disabled(leftSelection.isEmpty && rightSelection.isEmpty)
+
+                Divider().frame(height: 18)
+
+                explorerToolbarButton(showHiddenFiles ? "Hide Hidden" : "Show Hidden", systemImage: showHiddenFiles ? "eye.slash" : "eye") {
+                    showHiddenFiles.toggle()
+                }
+
+                Menu {
+                    Section("Show / Hide Columns") {
+                        ForEach(FilePaneView.FileColumn.allCases, id: \.self) { column in
+                            Button {
+                                toggleToolbarColumnVisibility(column)
+                            } label: {
+                                HStack {
+                                    Image(systemName: toolbarColumnHidden(column) ? "square" : "checkmark.square.fill")
+                                    Text(column.title)
+                                }
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    Button("Reset Columns") {
+                        resetToolbarColumns()
+                    }
+                } label: {
+                    Label("Columns", systemImage: "line.3.horizontal.decrease.circle")
+                }
+                .menuStyle(.borderlessButton)
                 
                 Spacer()
             }
@@ -191,7 +272,7 @@ struct DualPaneView: View {
             
             GeometryReader { geometry in
                 let totalWidth = max(geometry.size.width, 500)
-                let clampedSidebarWidth = min(max(quickAccessWidth, 170), totalWidth * 0.45)
+                let clampedSidebarWidth = min(max(quickAccessWidth, 150), totalWidth * 0.45)
                 let sidebarWidth = showNavigationPane ? clampedSidebarWidth : 0
                 let sidebarSplitterWidth: CGFloat = showNavigationPane ? 6 : 0
                 let remainingWidth = max(totalWidth - sidebarWidth - sidebarSplitterWidth - 6, 300)
@@ -216,7 +297,7 @@ struct DualPaneView: View {
                                         }
                                         let base = sidebarDragStartWidth ?? clampedSidebarWidth
                                         let proposed = base + value.translation.width
-                                        quickAccessWidth = min(max(proposed, 170), totalWidth * 0.45)
+                                        quickAccessWidth = min(max(proposed, 150), totalWidth * 0.45)
                                     }
                                     .onEnded { _ in
                                         sidebarDragStartWidth = nil
@@ -235,6 +316,7 @@ struct DualPaneView: View {
                             selection: $leftSelection,
                             searchText: $leftSearchText,
                             isSearching: $leftIsSearching,
+                            showHiddenFiles: showHiddenFiles,
                             title: "Left Pane",
                             isActive: activePane == .left,
                             onOpenInTerminal: { openInTerminal(leftPath) },
@@ -293,6 +375,7 @@ struct DualPaneView: View {
                             selection: $rightSelection,
                             searchText: $rightSearchText,
                             isSearching: $rightIsSearching,
+                            showHiddenFiles: showHiddenFiles,
                             title: "Right Pane",
                             isActive: activePane == .right,
                             onOpenInTerminal: { openInTerminal(rightPath) },
@@ -450,21 +533,32 @@ struct DualPaneView: View {
                             .padding(.bottom, 4)
                         
                         ForEach(mountedVolumes) { location in
-                            Button {
-                                navigateToLocation(location.url)
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: location.icon)
-                                        .foregroundColor(.accentColor)
-                                    Text(location.name)
-                                        .lineLimit(1)
-                                    Spacer()
+                            HStack(spacing: 8) {
+                                Button {
+                                    navigateToLocation(location.url)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: location.icon)
+                                            .foregroundColor(.accentColor)
+                                        Text(location.name)
+                                            .lineLimit(1)
+                                        Spacer()
+                                    }
+                                    .contentShape(Rectangle())
                                 }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .contentShape(Rectangle())
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    unmountVolume(location.url)
+                                } label: {
+                                    Image(systemName: "eject.fill")
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Unmount \(location.name)")
                             }
-                            .buttonStyle(.plain)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
                         }
                         
                         Divider().padding(.vertical, 6)
@@ -510,12 +604,47 @@ struct DualPaneView: View {
     }
     
     @ViewBuilder
-    private func explorerToolbarButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    private func explorerToolbarButton(
+        _ title: String,
+        systemImage: String,
+        shortcutHint: String? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .labelStyle(.titleAndIcon)
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title)
+                    if let shortcutHint, !shortcutHint.isEmpty {
+                        Text(shortcutHint)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
         }
         .buttonStyle(.bordered)
+    }
+
+    private func toolbarShortcutText(for action: ShortcutAction) -> String {
+        guard let binding = activeShortcutBindings.first(where: { $0.action == action && $0.isEnabled }),
+              let normalized = ShortcutParser.normalizedCombo(binding.combo) else {
+            return ""
+        }
+
+        return normalized
+            .split(separator: "+")
+            .map { token in
+                switch token {
+                case "cmd": return "Cmd"
+                case "shift": return "Shift"
+                case "opt": return "Opt"
+                case "ctrl": return "Ctrl"
+                case "fn": return "Fn"
+                default: return token.uppercased()
+                }
+            }
+            .joined(separator: "+")
     }
     
     private func openInTerminal(_ directory: URL) {
@@ -594,6 +723,26 @@ struct DualPaneView: View {
         var entries = Set(pinnedPathsRaw.split(separator: "\n").map(String.init))
         entries.insert(current)
         pinnedPathsRaw = entries.sorted().joined(separator: "\n")
+    }
+
+    private func unmountVolume(_ url: URL) {
+        Task {
+            do {
+                try await FileManager.default.unmountVolume(at: url, options: [])
+                await MainActor.run {
+                    refreshTrigger = UUID()
+                }
+            } catch {
+                await MainActor.run {
+                    let alert = NSAlert()
+                    alert.messageText = "Unable to Unmount Drive"
+                    alert.informativeText = "Could not unmount '\(url.lastPathComponent)': \(error.localizedDescription)"
+                    alert.addButton(withTitle: "OK")
+                    alert.alertStyle = .warning
+                    alert.runModal()
+                }
+            }
+        }
     }
     
     private func navigateBack(in pane: ActivePane) {
@@ -1043,11 +1192,13 @@ struct DualPaneView: View {
 
 struct FilePaneView: View {
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
+    @AppStorage("folderium.globalFontSize") private var globalFontSize: Double = 12
     @AppStorage("folderium.filePaneColumnsLayout") private var columnLayoutRaw: String = ""
     @Binding var path: URL
     @Binding var selection: Set<URL>
     @Binding var searchText: String
     @Binding var isSearching: Bool
+    let showHiddenFiles: Bool
     let title: String
     let isActive: Bool
     let onOpenInTerminal: () -> Void
@@ -1081,6 +1232,10 @@ struct FilePaneView: View {
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var directoryWatcher: DirectoryWatcher?
     @State private var watcherDebounceTask: Task<Void, Never>?
+    @State private var inlineRenamingURL: URL?
+    @State private var inlineRenameText: String = ""
+    @State private var lastPlainClickURL: URL?
+    @State private var lastPlainClickTimestamp: Date?
     
     enum SortOrder: CaseIterable {
         case name, type, size, modified
@@ -1103,11 +1258,12 @@ struct FilePaneView: View {
         case name, type, size, modified
 
         static let defaultOrder: [FileColumn] = [.name, .type, .size, .modified]
+        static let defaultHidden: Set<FileColumn> = [.type]
         static let defaultWidths: [FileColumn: CGFloat] = [
-            .name: 260,
+            .name: 360,
             .type: 130,
-            .size: 90,
-            .modified: 140
+            .size: 70,
+            .modified: 112
         ]
 
         var title: String {
@@ -1123,8 +1279,8 @@ struct FilePaneView: View {
             switch self {
             case .name: return 180
             case .type: return 120
-            case .size: return 80
-            case .modified: return 130
+            case .size: return 64
+            case .modified: return 102
             }
         }
     }
@@ -1133,6 +1289,18 @@ struct FilePaneView: View {
         let order: [String]
         let hidden: [String]
         let widths: [String: Double]
+    }
+
+    private var paneBaseFont: Font {
+        .system(size: CGFloat(globalFontSize))
+    }
+
+    private var paneSmallFont: Font {
+        .system(size: CGFloat(max(globalFontSize - 2, 10)))
+    }
+
+    private var paneTinyFont: Font {
+        .system(size: CGFloat(max(globalFontSize - 3, 9)))
     }
     
         private func compareFiles(first: FileItem, second: FileItem) -> Bool {
@@ -1172,6 +1340,20 @@ struct FilePaneView: View {
             RoundedRectangle(cornerRadius: 0)
                 .stroke(isActive ? Color.accentColor : Color.clear, lineWidth: 1)
         )
+        .background(
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear {
+                        tableWidth = geometry.size.width
+                        normalizeColumnWidthsToPaneWidth()
+                    }
+                    .onChange(of: geometry.size.width) { _, newWidth in
+                        tableWidth = newWidth
+                        normalizeColumnWidthsToPaneWidth()
+                        saveColumnLayout()
+                    }
+            }
+        )
         .clipped()
         .onAppear {
             pathInput = path.path
@@ -1183,6 +1365,7 @@ struct FilePaneView: View {
             // Clear selection when path changes
             selection = []
             pathInput = path.path
+            cancelInlineRename()
             loadFiles()
             startDirectoryWatcher()
         }
@@ -1197,6 +1380,9 @@ struct FilePaneView: View {
             }
         }
         .onChange(of: refreshTrigger) { _, _ in
+            loadFiles()
+        }
+        .onChange(of: showHiddenFiles) { _, _ in
             loadFiles()
         }
         .onChange(of: sortOrder) { _, _ in
@@ -1227,7 +1413,6 @@ struct FilePaneView: View {
     private var searchBarView: some View {
         HStack {
             searchFieldView
-            autoRefreshIndicator
             Spacer()
             terminalButtonView
         }
@@ -1237,23 +1422,6 @@ struct FilePaneView: View {
         .onTapGesture {
             onFocus()
         }
-    }
-    
-    @ViewBuilder
-    private var autoRefreshIndicator: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(Color.green)
-                .frame(width: 6, height: 6)
-            Text("Auto-refresh")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(FolderiumTheme.controlBackground(isSoftDark: softDarkThemeEnabled))
-        .cornerRadius(6)
-        .help("Folder updates are watched automatically.")
     }
     
     @ViewBuilder
@@ -1332,7 +1500,7 @@ struct FilePaneView: View {
             if isEditingPathBar {
                 TextField("Enter path", text: $pathInput)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
+                    .font(.system(size: CGFloat(globalFontSize), design: .monospaced))
                     .focused($isPathFieldFocused)
                     .onSubmit {
                         if commitPathInput() {
@@ -1368,7 +1536,7 @@ struct FilePaneView: View {
                             
                             if index < pathComponents.count - 1 {
                                 Image(systemName: "chevron.right")
-                                    .font(.caption2)
+                                    .font(paneTinyFont)
                                     .foregroundColor(.secondary)
                             }
                         }
@@ -1449,7 +1617,7 @@ struct FilePaneView: View {
         HStack(spacing: 0) {
             ForEach(Array(visibleColumns.enumerated()), id: \.element) { index, column in
                 columnHeaderButton(for: column)
-                    .frame(width: columnWidth(for: column), alignment: .leading)
+                    .frame(width: effectiveColumnWidth(for: column), alignment: .leading)
 
                 if index < visibleColumns.count - 1 {
                     columnResizeHandle(for: column)
@@ -1457,50 +1625,11 @@ struct FilePaneView: View {
             }
 
             Spacer(minLength: 0)
-
-            Menu {
-                Section("Show / Hide Columns") {
-                    ForEach(FileColumn.allCases, id: \.self) { column in
-                        Button {
-                            toggleColumnVisibility(column)
-                        } label: {
-                            HStack {
-                                Image(systemName: hiddenColumns.contains(column) ? "square" : "checkmark.square.fill")
-                                Text(column.title)
-                            }
-                        }
-                    }
-                }
-
-                Divider()
-
-                Button("Reset Columns") {
-                    resetColumnsToDefault()
-                }
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.body)
-            }
-            .padding(.leading, 8)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(FolderiumTheme.controlBackground(isSoftDark: softDarkThemeEnabled))
         .clipped()
-        .background(
-            GeometryReader { geometry in
-                Color.clear
-                    .onAppear {
-                        tableWidth = geometry.size.width
-                        normalizeColumnWidthsToPaneWidth()
-                    }
-                    .onChange(of: geometry.size.width) { _, newWidth in
-                        tableWidth = newWidth
-                        normalizeColumnWidthsToPaneWidth()
-                        saveColumnLayout()
-                    }
-            }
-        )
     }
 
     private var visibleColumns: [FileColumn] {
@@ -1512,11 +1641,27 @@ struct FilePaneView: View {
         return max(base, column.minWidth)
     }
 
+    private func effectiveColumnWidth(for column: FileColumn) -> CGFloat {
+        let baseWidth = columnWidth(for: column)
+        let fillColumn = visibleColumns.contains(.name) ? FileColumn.name : visibleColumns.first
+        guard let fillColumn, fillColumn == column else {
+            return baseWidth
+        }
+
+        let usedByOthers = visibleColumns
+            .filter { $0 != column }
+            .reduce(CGFloat(0)) { partial, item in
+                partial + columnWidth(for: item)
+            }
+        let remaining = max(availableWidthForColumns() - usedByOthers, baseWidth)
+        return remaining
+    }
+
     private func availableWidthForColumns() -> CGFloat {
+        guard tableWidth > 0 else { return 10_000 }
         let separators = CGFloat(max(visibleColumns.count - 1, 0)) * 5
-        let reservedMenuSpace: CGFloat = 40
         let reservedHorizontalPadding: CGFloat = 24 // 12 left + 12 right
-        return max(tableWidth - reservedHorizontalPadding - reservedMenuSpace - separators, 120)
+        return max(tableWidth - reservedHorizontalPadding - separators, 120)
     }
 
     private func maxAllowedWidth(for column: FileColumn) -> CGFloat {
@@ -1569,12 +1714,12 @@ struct FilePaneView: View {
         Button(action: { sortBy(sortOrder(for: column)) }) {
             HStack(spacing: 4) {
                 Text(column.title)
-                    .font(.caption)
+                    .font(paneSmallFont)
                     .fontWeight(.medium)
                     .lineLimit(1)
                 if sortOrder == sortOrder(for: column) {
                     Image(systemName: sortDirection == .ascending ? "chevron.up" : "chevron.down")
-                        .font(.caption2)
+                        .font(paneTinyFont)
                 }
             }
             .padding(.horizontal, 4)
@@ -1644,12 +1789,20 @@ struct FilePaneView: View {
                         isSelected: selection.contains(file.url),
                         currentSelection: selection,
                         isStriped: index % 2 == 1,
+                        isInlineRenaming: inlineRenamingURL == file.url,
+                        inlineRenameText: Binding(
+                            get: { inlineRenameText },
+                            set: { inlineRenameText = $0 }
+                        ),
                         visibleColumns: visibleColumns,
                         columnWidths: columnWidths,
+                        availableColumnsWidth: availableWidthForColumns(),
                         onSelectWithModifiers: { isCommand, isShift in
-                            toggleSelectionWithModifier(file.url, isCommandPressed: isCommand, isShiftPressed: isShift)
+                            handleRowClick(file.url, isCommandPressed: isCommand, isShiftPressed: isShift)
                         },
                         onDoubleClick: { handleDoubleClick(file) },
+                        onCommitInlineRename: commitInlineRename,
+                        onCancelInlineRename: cancelInlineRename,
                         onFileOperation: { 
                             loadFiles()
                             onRefresh()
@@ -1735,7 +1888,7 @@ struct FilePaneView: View {
 
     private func resetColumnsToDefault() {
         columnOrder = FileColumn.defaultOrder
-        hiddenColumns = []
+        hiddenColumns = FileColumn.defaultHidden
         columnWidths = FileColumn.defaultWidths
         normalizeColumnWidthsToPaneWidth()
         saveColumnLayout()
@@ -1744,14 +1897,14 @@ struct FilePaneView: View {
     private func loadColumnLayout() {
         guard !columnLayoutRaw.isEmpty, let data = columnLayoutRaw.data(using: .utf8) else {
             columnOrder = FileColumn.defaultOrder
-            hiddenColumns = []
+            hiddenColumns = FileColumn.defaultHidden
             columnWidths = FileColumn.defaultWidths
             return
         }
 
         guard let persisted = try? JSONDecoder().decode(PersistedColumnsLayout.self, from: data) else {
             columnOrder = FileColumn.defaultOrder
-            hiddenColumns = []
+            hiddenColumns = FileColumn.defaultHidden
             columnWidths = FileColumn.defaultWidths
             return
         }
@@ -1799,6 +1952,85 @@ struct FilePaneView: View {
             // Single click - clear and select only this item
             selection = [url]
         }
+    }
+
+    private func handleRowClick(_ url: URL, isCommandPressed: Bool, isShiftPressed: Bool) {
+        let wasSingleSelected = selection.count == 1 && selection.contains(url)
+
+        if inlineRenamingURL != nil && inlineRenamingURL != url {
+            cancelInlineRename()
+        }
+
+        toggleSelectionWithModifier(url, isCommandPressed: isCommandPressed, isShiftPressed: isShiftPressed)
+
+        guard !isCommandPressed, !isShiftPressed else {
+            lastPlainClickURL = nil
+            lastPlainClickTimestamp = nil
+            return
+        }
+
+        guard wasSingleSelected else {
+            lastPlainClickURL = url
+            lastPlainClickTimestamp = Date()
+            return
+        }
+
+        let now = Date()
+        let interval = now.timeIntervalSince(lastPlainClickTimestamp ?? .distantPast)
+        let minSlowSecondClickInterval: TimeInterval = 0.45
+        let maxSlowSecondClickInterval: TimeInterval = 2.0
+
+        if lastPlainClickURL == url,
+           interval >= minSlowSecondClickInterval,
+           interval <= maxSlowSecondClickInterval {
+            beginInlineRename(for: url)
+            lastPlainClickURL = nil
+            lastPlainClickTimestamp = nil
+        } else {
+            lastPlainClickURL = url
+            lastPlainClickTimestamp = now
+        }
+    }
+
+    private func beginInlineRename(for url: URL) {
+        inlineRenamingURL = url
+        inlineRenameText = url.lastPathComponent
+    }
+
+    private func commitInlineRename() {
+        guard let sourceURL = inlineRenamingURL else { return }
+        let newName = inlineRenameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty else {
+            cancelInlineRename()
+            return
+        }
+
+        let destinationURL = sourceURL.deletingLastPathComponent().appendingPathComponent(newName)
+        guard destinationURL != sourceURL else {
+            cancelInlineRename()
+            return
+        }
+
+        do {
+            try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+            selection = [destinationURL]
+            cancelInlineRename()
+            loadFiles()
+            onRefresh()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Rename Failed"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "OK")
+            alert.alertStyle = .warning
+            alert.runModal()
+            cancelInlineRename()
+        }
+    }
+
+    private func cancelInlineRename() {
+        inlineRenamingURL = nil
+        inlineRenameText = ""
     }
     
     private func selectRange(to url: URL) {
@@ -1894,7 +2126,7 @@ struct FilePaneView: View {
                 let contents = try fileManager.contentsOfDirectory(
                     at: path,
                     includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .creationDateKey],
-                    options: [.skipsHiddenFiles]
+                    options: showHiddenFiles ? [] : [.skipsHiddenFiles]
                 )
                 
                 let fileItems = contents.map { url in
@@ -2223,7 +2455,7 @@ struct FilePaneView: View {
                         Image(systemName: "doc")
                             .foregroundColor(.secondary)
                         Text("File")
-                            .font(.system(.body, design: .default))
+                            .font(paneBaseFont)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -2239,7 +2471,7 @@ struct FilePaneView: View {
                         .foregroundColor(file.iconColor)
                         .symbolRenderingMode(.hierarchical)
                     Text(file.name)
-                        .font(.system(.body, design: .default))
+                        .font(paneBaseFont)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -2253,7 +2485,7 @@ struct FilePaneView: View {
                     Image(systemName: "doc.on.doc")
                         .foregroundColor(.blue)
                     Text("\(selection.count) items")
-                        .font(.system(.body, design: .default))
+                        .font(paneBaseFont)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -2309,6 +2541,9 @@ private struct ColumnReorderDropDelegate: DropDelegate {
 
 struct FileRowView: View {
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
+    @AppStorage("folderium.globalFontSize") private var globalFontSize: Double = 12
+    @FocusState private var inlineRenameFieldFocused: Bool
+    @State private var isNameTooltipVisible: Bool = false
     private static let rowDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
@@ -2320,10 +2555,15 @@ struct FileRowView: View {
     let isSelected: Bool
     let currentSelection: Set<URL>
     let isStriped: Bool
+    let isInlineRenaming: Bool
+    @Binding var inlineRenameText: String
     let visibleColumns: [FilePaneView.FileColumn]
     let columnWidths: [FilePaneView.FileColumn: CGFloat]
+    let availableColumnsWidth: CGFloat
     let onSelectWithModifiers: (Bool, Bool) -> Void
     let onDoubleClick: () -> Void
+    let onCommitInlineRename: () -> Void
+    let onCancelInlineRename: () -> Void
     let onFileOperation: () -> Void
     let onBulkCompress: () -> Void
     let onFocus: () -> Void
@@ -2382,13 +2622,24 @@ struct FileRowView: View {
                     .foregroundColor(file.iconColor)
                     .symbolRenderingMode(.hierarchical)
                 Text(file.name)
-                    .font(.system(.body, design: .default))
+                    .font(.system(size: CGFloat(globalFontSize)))
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(FolderiumTheme.controlBackground(isSoftDark: softDarkThemeEnabled))
             .cornerRadius(4)
             .shadow(radius: 2)
+        }
+        .onAppear {
+            if isInlineRenaming {
+                inlineRenameFieldFocused = true
+            }
+        }
+        .onChange(of: isInlineRenaming) { _, newValue in
+            inlineRenameFieldFocused = newValue
+            if newValue {
+                isNameTooltipVisible = false
+            }
         }
     }
     
@@ -2399,7 +2650,17 @@ struct FileRowView: View {
 
     private func width(for column: FilePaneView.FileColumn) -> CGFloat {
         let defaultWidth = FilePaneView.FileColumn.defaultWidths[column] ?? 120
-        return max(columnWidths[column] ?? defaultWidth, column.minWidth)
+        let baseWidth = max(columnWidths[column] ?? defaultWidth, column.minWidth)
+        let fillColumn = visibleColumns.contains(.name) ? FilePaneView.FileColumn.name : visibleColumns.first
+        guard let fillColumn, fillColumn == column else {
+            return baseWidth
+        }
+
+        let usedByOthers = visibleColumns.filter { $0 != column }.reduce(CGFloat(0)) { partial, item in
+            let itemDefault = FilePaneView.FileColumn.defaultWidths[item] ?? 120
+            return partial + max(columnWidths[item] ?? itemDefault, item.minWidth)
+        }
+        return max(availableColumnsWidth - usedByOthers, baseWidth)
     }
 
     @ViewBuilder
@@ -2412,25 +2673,48 @@ struct FileRowView: View {
                     .symbolRenderingMode(.hierarchical)
                     .frame(width: 16)
 
-                Text(file.name)
-                    .font(.system(.body, design: .default))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                if isInlineRenaming {
+                    TextField("", text: $inlineRenameText)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($inlineRenameFieldFocused)
+                        .onSubmit {
+                            onCommitInlineRename()
+                        }
+                        .onExitCommand {
+                            onCancelInlineRename()
+                        }
+                } else {
+                    Text(file.name)
+                        .font(.system(size: CGFloat(globalFontSize)))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .onHover { hovering in
+                            isNameTooltipVisible = hovering
+                        }
+                        .popover(isPresented: $isNameTooltipVisible, arrowEdge: .bottom) {
+                            Text(file.url.lastPathComponent)
+                                .font(.system(size: max(globalFontSize - 1, 10)))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                        }
+                }
             }
         case .type:
             Text(file.localizedType)
-                .font(.system(.body, design: .default))
+                .font(.system(size: CGFloat(globalFontSize)))
                 .foregroundColor(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
         case .size:
             Text(file.isDirectory ? "--" : file.sizeString)
-                .font(.system(.body, design: .default))
+                .font(.system(size: CGFloat(globalFontSize)))
                 .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         case .modified:
             Text(formatDate(file.modificationDate))
-                .font(.system(.body, design: .default))
+                .font(.system(size: CGFloat(globalFontSize)))
                 .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 }
@@ -2444,8 +2728,14 @@ enum PaneBookmarkKey: String {
 enum SandboxAccessManager {
     private static let leftBookmarkKey = "folderium.bookmark.left"
     private static let rightBookmarkKey = "folderium.bookmark.right"
-    static let defaultDirectory = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        ?? URL(fileURLWithPath: NSHomeDirectory())
+    static let defaultDirectory: URL = {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let folderiumRoot = base.appendingPathComponent("Folderium", isDirectory: true)
+        let startupFolder = folderiumRoot.appendingPathComponent("Startup", isDirectory: true)
+        try? FileManager.default.createDirectory(at: startupFolder, withIntermediateDirectories: true)
+        return startupFolder
+    }()
     
     static func saveBookmark(for pane: PaneBookmarkKey, url: URL) {
         do {
@@ -3389,6 +3679,7 @@ struct EmptyAreaContextMenu: View {
 
 struct StatusBarView: View {
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
+    @AppStorage("folderium.globalFontSize") private var globalFontSize: Double = 12
     let files: [FileItem]
     
     private var folderCount: Int {
@@ -3406,6 +3697,10 @@ struct StatusBarView: View {
     private var totalSizeString: String {
         ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file)
     }
+
+    private var statusFont: Font {
+        .system(size: CGFloat(max(globalFontSize - 2, 10)))
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -3416,25 +3711,25 @@ struct StatusBarView: View {
                 HStack(spacing: 16) {
                     HStack(spacing: 4) {
                         Image(systemName: "folder")
-                            .font(.caption)
+                            .font(statusFont)
                             .foregroundColor(.blue)
                         Text("\(folderCount)")
-                            .font(.caption)
+                            .font(statusFont)
                             .fontWeight(.medium)
                         Text("folders")
-                            .font(.caption)
+                            .font(statusFont)
                             .foregroundColor(.secondary)
                     }
                     
                     HStack(spacing: 4) {
                         Image(systemName: "doc")
-                            .font(.caption)
+                            .font(statusFont)
                             .foregroundColor(.secondary)
                         Text("\(fileCount)")
-                            .font(.caption)
+                            .font(statusFont)
                             .fontWeight(.medium)
                         Text("files")
-                            .font(.caption)
+                            .font(statusFont)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -3444,13 +3739,13 @@ struct StatusBarView: View {
                 // Total size
                 HStack(spacing: 4) {
                     Image(systemName: "externaldrive")
-                        .font(.caption)
+                        .font(statusFont)
                         .foregroundColor(.orange)
                     Text(totalSizeString)
-                        .font(.caption)
+                        .font(statusFont)
                         .fontWeight(.medium)
                     Text("total")
-                        .font(.caption)
+                        .font(statusFont)
                         .foregroundColor(.secondary)
                 }
             }

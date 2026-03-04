@@ -3,7 +3,8 @@ import SwiftUI
 struct ContentView: View {
     private let defaultPreviewWidthRatio: CGFloat = 0.22
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
-    @AppStorage("folderium.isPreviewVisible") private var isPreviewVisible: Bool = true
+    @AppStorage("folderium.globalFontSize") private var globalFontSize: Double = 12
+    @AppStorage("folderium.isPreviewVisible") private var isPreviewVisible: Bool = false
     @AppStorage("folderium.isNavigationPaneVisible") private var isNavigationPaneVisible: Bool = true
     @State private var selectedFiles: Set<URL> = []
     @State private var previewSelection: Set<URL> = []
@@ -13,7 +14,7 @@ struct ContentView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
                 Button(isNavigationPaneVisible ? "Hide Navigation" : "Show Navigation") {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isNavigationPaneVisible.toggle()
@@ -27,9 +28,12 @@ struct ContentView: View {
                     }
                 }
                 .buttonStyle(.bordered)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+
+                Spacer()
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(FolderiumTheme.controlBackground(isSoftDark: softDarkThemeEnabled))
             
             Divider()
@@ -98,6 +102,7 @@ struct ContentView: View {
             }
         }
         .background(FolderiumTheme.windowBackground(isSoftDark: softDarkThemeEnabled))
+        .font(.system(size: globalFontSize))
         .preferredColorScheme(softDarkThemeEnabled ? .dark : .light)
     }
 }

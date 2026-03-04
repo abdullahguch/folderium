@@ -76,7 +76,7 @@ enum ShortcutStore {
     static var defaultBindings: [ShortcutBinding] {
         [
             ShortcutBinding(action: .newWindow, combo: "cmd+n"),
-            ShortcutBinding(action: .renameSelected, combo: "f2"),
+            ShortcutBinding(action: .renameSelected, combo: "shift+f2"),
             ShortcutBinding(action: .copySelected, combo: "cmd+c"),
             ShortcutBinding(action: .cutSelected, combo: "cmd+x"),
             ShortcutBinding(action: .pasteIntoActivePane, combo: "cmd+v"),
@@ -96,9 +96,23 @@ enum ShortcutStore {
         }
 
         do {
-            return try JSONDecoder().decode([ShortcutBinding].self, from: data)
+            let decoded = try JSONDecoder().decode([ShortcutBinding].self, from: data)
+            return migrateLegacyRenameShortcut(decoded)
         } catch {
             return defaultBindings
+        }
+    }
+
+    private static func migrateLegacyRenameShortcut(_ shortcuts: [ShortcutBinding]) -> [ShortcutBinding] {
+        shortcuts.map { shortcut in
+            guard shortcut.action == .renameSelected,
+                  ShortcutParser.normalizedCombo(shortcut.combo) == "f2" else {
+                return shortcut
+            }
+
+            var migrated = shortcut
+            migrated.combo = "shift+f2"
+            return migrated
         }
     }
 
@@ -219,10 +233,14 @@ struct FolderiumApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Folderium") {
             ContentView()
+                .background(
+                    WindowChromeConfigurator()
+                        .frame(width: 0, height: 0)
+                )
         }
-        .windowStyle(.hiddenTitleBar)
+        .windowStyle(.titleBar)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1400, height: 900)
         .commands {
@@ -256,6 +274,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let screen = NSScreen.main else { return }
         
         let screenFrame = screen.visibleFrame
+        Self.configureWindowChrome(window)
         window.setFrame(screenFrame, display: true, animate: true)
     }
     
@@ -283,6 +302,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let contentView = ContentView()
         newWindow.contentView = NSHostingView(rootView: contentView)
         newWindow.title = "Folderium"
+        Self.configureWindowChrome(newWindow)
         newWindow.setFrame(screenFrame, display: true)
         newWindow.isReleasedWhenClosed = true
         
@@ -290,46 +310,169 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         newWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    static func configureWindowChrome(_ window: NSWindow) {
+        let centeredTitleTag = 98_420
+        window.title = "Folderium"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = false
+
+        guard let titlebarView = window.standardWindowButton(.closeButton)?.superview else { return }
+
+        if titlebarView.viewWithTag(centeredTitleTag) == nil {
+            let titleLabel = NSTextField(labelWithString: "Folderium")
+            titleLabel.tag = centeredTitleTag
+            titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+            titleLabel.textColor = .labelColor
+            titleLabel.alignment = .center
+            titleLabel.lineBreakMode = .byTruncatingTail
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+            titlebarView.addSubview(titleLabel)
+
+            NSLayoutConstraint.activate([
+                titleLabel.centerXAnchor.constraint(equalTo: titlebarView.centerXAnchor),
+                titleLabel.centerYAnchor.constraint(equalTo: titlebarView.centerYAnchor),
+                titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: titlebarView.leadingAnchor, constant: 96),
+                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: titlebarView.trailingAnchor, constant: -96)
+            ])
+        }
+
+        let hasDoubleClickRecognizer = titlebarView.gestureRecognizers.contains(where: { recognizer in
+            guard let clickRecognizer = recognizer as? NSClickGestureRecognizer else { return false }
+            return clickRecognizer.target === TitlebarZoomHandler.shared &&
+                clickRecognizer.action == #selector(TitlebarZoomHandler.handleDoubleClick(_:)) &&
+                clickRecognizer.numberOfClicksRequired == 2
+        })
+
+        if !hasDoubleClickRecognizer {
+            let recognizer = NSClickGestureRecognizer(target: TitlebarZoomHandler.shared, action: #selector(TitlebarZoomHandler.handleDoubleClick(_:)))
+            recognizer.numberOfClicksRequired = 2
+            titlebarView.addGestureRecognizer(recognizer)
+        }
+    }
+}
+
+private final class TitlebarZoomHandler: NSObject {
+    static let shared = TitlebarZoomHandler()
+    private var previousFrames: [ObjectIdentifier: NSRect] = [:]
+
+    @objc func handleDoubleClick(_ recognizer: NSClickGestureRecognizer) {
+        guard recognizer.state == .ended,
+              let hostView = recognizer.view,
+              let window = hostView.window else { return }
+
+        let location = recognizer.location(in: hostView)
+        let controlButtons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        let clickedControl = controlButtons.contains { buttonType in
+            guard let button = window.standardWindowButton(buttonType) else { return false }
+            let frameInTitlebar = button.convert(button.bounds, to: hostView)
+            return frameInTitlebar.contains(location)
+        }
+        guard !clickedControl else { return }
+
+        toggleFillScreenWithoutFullscreen(window)
+    }
+
+    private func toggleFillScreenWithoutFullscreen(_ window: NSWindow) {
+        guard let screen = window.screen ?? NSScreen.main else { return }
+        let targetFrame = screen.visibleFrame
+        let windowID = ObjectIdentifier(window)
+
+        if isApproximatelyEqual(window.frame, targetFrame),
+           let previous = previousFrames[windowID] {
+            window.setFrame(previous, display: true, animate: true)
+            previousFrames.removeValue(forKey: windowID)
+            return
+        }
+
+        previousFrames[windowID] = window.frame
+        window.setFrame(targetFrame, display: true, animate: true)
+    }
+
+    private func isApproximatelyEqual(_ lhs: NSRect, _ rhs: NSRect, tolerance: CGFloat = 2) -> Bool {
+        abs(lhs.origin.x - rhs.origin.x) <= tolerance &&
+        abs(lhs.origin.y - rhs.origin.y) <= tolerance &&
+        abs(lhs.size.width - rhs.size.width) <= tolerance &&
+        abs(lhs.size.height - rhs.size.height) <= tolerance
+    }
+}
+
+private struct WindowChromeConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            if let window = view.window {
+                AppDelegate.configureWindowChrome(window)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            if let window = nsView.window {
+                AppDelegate.configureWindowChrome(window)
+            }
+        }
+    }
 }
 
 struct SettingsView: View {
     @AppStorage("folderium.windowsFamiliarMode") private var windowsFamiliarMode: Bool = true
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
+    @AppStorage("folderium.globalFontSize") private var globalFontSize: Double = 12
     @AppStorage(ShortcutStore.storageKey) private var shortcutsRaw: String = ""
     @State private var shortcuts: [ShortcutBinding] = ShortcutStore.defaultBindings
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Folderium Settings")
-                .font(.title)
-            
-            Text("Privacy-focused file manager for macOS")
-                .foregroundColor(.secondary)
-            
-            Toggle("Windows Familiar Mode", isOn: $windowsFamiliarMode)
-            
-            Text("When enabled, Folderium prioritizes File Explorer-like labels and interactions.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Folderium Settings")
+                    .font(.title)
+                
+                Text("Privacy-focused file manager for macOS")
+                    .foregroundColor(.secondary)
+                
+                Toggle("Windows Familiar Mode", isOn: $windowsFamiliarMode)
+                
+                Text("When enabled, Folderium prioritizes File Explorer-like labels and interactions.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
 
-            Divider()
+                Divider()
 
-            Toggle("Soft Dark Theme", isOn: $softDarkThemeEnabled)
+                Toggle("Soft Dark Theme", isOn: $softDarkThemeEnabled)
 
-            Text("Uses a charcoal-gray dark appearance that is easier on the eyes than pure black.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                Text("Uses a charcoal-gray dark appearance that is easier on the eyes than pure black.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
 
-            Divider()
+                Divider()
 
-            ShortcutSettingsPanel(shortcuts: $shortcuts) {
-                shortcuts = ShortcutStore.defaultBindings
-                shortcutsRaw = ShortcutStore.save(shortcuts)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Global Font Size")
+                        Spacer()
+                        Text("\(Int(globalFontSize))")
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(value: $globalFontSize, in: 11...20, step: 1)
+                    Text("Applies a global base font size across the app windows.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Divider()
+
+                ShortcutSettingsPanel(shortcuts: $shortcuts) {
+                    shortcuts = ShortcutStore.defaultBindings
+                    shortcutsRaw = ShortcutStore.save(shortcuts)
+                }
+                
+                Spacer(minLength: 0)
             }
-            
-            Spacer()
+            .padding()
         }
-        .padding()
         .frame(width: 680, height: 520)
         .onAppear {
             shortcuts = ShortcutStore.load(from: shortcutsRaw)
@@ -371,7 +514,7 @@ struct ShortcutSettingsPanel: View {
                     .font(.headline)
                 Spacer()
                 Button("Add Shortcut") {
-                    shortcuts.append(ShortcutBinding(action: .renameSelected, combo: "f2"))
+                    shortcuts.append(ShortcutBinding(action: .renameSelected, combo: "shift+f2"))
                 }
                 .buttonStyle(.bordered)
 
