@@ -145,10 +145,10 @@
 							View on GitHub
 						</a>
 						<a
-							href="Folderium-1.1.0.dmg"
+							href="Folderium-1.0.0.dmg"
 							class="bg-white text-folderium-blue border-2 border-folderium-blue px-8 py-4 rounded-lg font-semibold text-lg hover:bg-folderium-blue hover:text-white transition-colors shadow-lg">
 							<i class="fas fa-download mr-2"></i>
-							Download v1.1.0
+							Download v1.0.0
 						</a>
 					</div>
 				</div>
@@ -272,16 +272,16 @@
 							<i class="fas fa-desktop text-folderium-blue text-4xl mr-4"></i>
 							<div>
 								<h3 class="text-2xl font-bold text-gray-900">macOS</h3>
-								<p class="text-gray-600">Version 1.1.0</p>
+								<p class="text-gray-600">Version 1.0.0</p>
 							</div>
 						</div>
 
 						<div class="space-y-4">
 							<a
-								href="Folderium-1.1.0.dmg"
+								href="Folderium-1.0.0.dmg"
 								class="w-full bg-folderium-blue text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-blue-600 transition-colors shadow-lg flex items-center justify-center">
 								<i class="fas fa-download mr-2"></i>
-								Download v1.1.0 DMG
+								Download v1.0.0 DMG
 							</a>
 							<a
 								href="https://github.com/abdullahguch/folderium"
