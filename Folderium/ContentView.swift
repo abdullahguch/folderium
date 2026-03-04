@@ -3,14 +3,14 @@ import AVKit
 import PDFKit
 
 struct ContentView: View {
-    private let defaultPreviewWidthRatio: CGFloat = 0.22
+    private let defaultPreviewWidthRatio: CGFloat = 0.34
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
     @AppStorage("folderium.globalFontSize") private var globalFontSize: Double = 12
     @AppStorage("folderium.isPreviewVisible") private var isPreviewVisible: Bool = false
     @AppStorage("folderium.isNavigationPaneVisible") private var isNavigationPaneVisible: Bool = true
     @State private var selectedFiles: Set<URL> = []
     @State private var previewSelection: Set<URL> = []
-    @State private var previewWidthRatio: CGFloat = 0.22
+    @State private var previewWidthRatio: CGFloat = 0.34
     @State private var previewDragStartWidth: CGFloat?
     @State private var previewUpdateTask: Task<Void, Never>?
     
@@ -26,7 +26,12 @@ struct ContentView: View {
                 
                 Button(isPreviewVisible ? "Hide Preview" : "Show Preview") {
                     withAnimation(.easeInOut(duration: 0.2)) {
-                        isPreviewVisible.toggle()
+                        if isPreviewVisible {
+                            isPreviewVisible = false
+                        } else {
+                            previewWidthRatio = max(previewWidthRatio, defaultPreviewWidthRatio)
+                            isPreviewVisible = true
+                        }
                     }
                 }
                 .buttonStyle(.bordered)
@@ -41,6 +46,13 @@ struct ContentView: View {
             Divider()
             
             GeometryReader { geometry in
+                let previewDividerWidth: CGFloat = isPreviewVisible ? 6 : 0
+                let availableContentWidth = max(geometry.size.width - previewDividerWidth, 0)
+                let dualPaneWidth = isPreviewVisible
+                    ? availableContentWidth * (1 - previewWidthRatio)
+                    : availableContentWidth
+                let previewPaneWidth = availableContentWidth * previewWidthRatio
+
                 HStack(spacing: 0) {
                     // Dual pane content
                     DualPaneView(
@@ -51,19 +63,20 @@ struct ContentView: View {
                                 selectedFiles = []
                             }
                         },
-                        showNavigationPane: $isNavigationPaneVisible
+                        showNavigationPane: $isNavigationPaneVisible,
+                        isSinglePaneMode: isPreviewVisible
                     )
-                    .frame(width: isPreviewVisible ? geometry.size.width * (1 - previewWidthRatio) : geometry.size.width)
+                    .frame(width: dualPaneWidth)
                     
                     if isPreviewVisible {
                         Rectangle()
                             .fill(FolderiumTheme.separator(isSoftDark: softDarkThemeEnabled))
-                            .frame(width: 6)
+                            .frame(width: previewDividerWidth)
                             .contentShape(Rectangle())
                             .gesture(
                                 DragGesture(minimumDistance: 2)
                                     .onChanged { value in
-                                        let totalWidth = geometry.size.width
+                                        let totalWidth = availableContentWidth
                                         guard totalWidth > 0 else { return }
                                         let currentPreviewWidth = totalWidth * previewWidthRatio
                                         if previewDragStartWidth == nil {
@@ -88,7 +101,7 @@ struct ContentView: View {
                         
                         // Preview pane
                         FilePreviewView(selectedFiles: Array(previewSelection))
-                            .frame(width: geometry.size.width * previewWidthRatio)
+                            .frame(width: previewPaneWidth)
                             .id("preview-\(previewSelection.count)")
                     }
                 }

@@ -58,6 +58,8 @@ struct DualPaneView: View {
     @State private var draggedPinnedPath: String?
     @State private var undoStack: [FileMoveBatch] = []
     @State private var redoStack: [FileMoveBatch] = []
+    @State private var paneLayoutEpoch: Int = 0
+    let isSinglePaneMode: Bool
     
     private enum DeleteIntent {
         case trash
@@ -92,10 +94,12 @@ struct DualPaneView: View {
     
     init(
         onSelectionChange: ((Set<URL>) -> Void)? = nil,
-        showNavigationPane: Binding<Bool> = .constant(true)
+        showNavigationPane: Binding<Bool> = .constant(true),
+        isSinglePaneMode: Bool = false
     ) {
         self.onSelectionChange = onSelectionChange
         self._showNavigationPane = showNavigationPane
+        self.isSinglePaneMode = isSinglePaneMode
     }
     
     private var quickLocations: [QuickLocation] {
@@ -281,10 +285,12 @@ struct DualPaneView: View {
                 let clampedSidebarWidth = min(max(quickAccessWidth, 150), totalWidth * 0.45)
                 let sidebarWidth = showNavigationPane ? clampedSidebarWidth : 0
                 let sidebarSplitterWidth: CGFloat = showNavigationPane ? 6 : 0
-                let remainingWidth = max(totalWidth - sidebarWidth - sidebarSplitterWidth - 6, 300)
+                let paneSplitterWidth: CGFloat = isSinglePaneMode ? 0 : 6
+                let remainingWidth = max(totalWidth - sidebarWidth - sidebarSplitterWidth - paneSplitterWidth, 300)
                 let clampedPaneSplit = min(max(paneSplitRatio, 0.2), 0.8)
-                let leftPaneWidth = max((remainingWidth - 6) * clampedPaneSplit, 150)
-                let rightPaneWidth = max((remainingWidth - 6) - leftPaneWidth, 150)
+                let minPaneWidth: CGFloat = 150
+                let leftPaneWidth = min(max(remainingWidth * clampedPaneSplit, minPaneWidth), remainingWidth - minPaneWidth)
+                let rightPaneWidth = remainingWidth - leftPaneWidth
                 
                 HStack(spacing: 0) {
                     if showNavigationPane {
@@ -316,122 +322,133 @@ struct DualPaneView: View {
                             }
                     }
                     
-                    VStack(spacing: 0) {
-                        FilePaneView(
-                            path: $leftPath,
-                            selection: $leftSelection,
-                            searchText: $leftSearchText,
-                            isSearching: $leftIsSearching,
-                            showHiddenFiles: showHiddenFiles,
-                            title: "Left Pane",
-                            isActive: activePane == .left,
-                            onOpenInTerminal: { openInTerminal(leftPath) },
-                            onRefresh: { refreshTrigger = UUID() },
-                            refreshTrigger: refreshTrigger,
-                            onBulkCompress: compressSelectedFiles,
-                            canNavigateBack: !leftBackHistory.isEmpty,
-                            canNavigateForward: !leftForwardHistory.isEmpty,
-                            onNavigateBack: { navigateBack(in: .left) },
-                            onNavigateForward: { navigateForward(in: .left) },
-                            onNavigateUp: { navigateUp(in: .left) },
-                            canPasteFromClipboard: { hasFilesInClipboard() },
-                            onPasteIntoPath: { destination in
-                                activePane = .left
-                                pasteFiles(destinationOverride: destination ?? leftPath)
-                            },
-                            onRecordMoveBatch: { title, pairs in
-                                recordMovedItemsBatch(title: title, pairs: pairs)
-                            },
-                            onDisplayedURLsChange: { urls in
-                                leftDisplayedURLs = urls
-                            },
-                            onFocus: {
-                                activePane = .left
+                    if !isSinglePaneMode || activePane == .left {
+                        VStack(spacing: 0) {
+                            FilePaneView(
+                                path: $leftPath,
+                                selection: $leftSelection,
+                                searchText: $leftSearchText,
+                                isSearching: $leftIsSearching,
+                                showHiddenFiles: showHiddenFiles,
+                                title: "Left Pane",
+                                isActive: activePane == .left,
+                                onOpenInTerminal: { openInTerminal(leftPath) },
+                                onRefresh: { refreshTrigger = UUID() },
+                                refreshTrigger: refreshTrigger,
+                                onBulkCompress: compressSelectedFiles,
+                                canNavigateBack: !leftBackHistory.isEmpty,
+                                canNavigateForward: !leftForwardHistory.isEmpty,
+                                onNavigateBack: { navigateBack(in: .left) },
+                                onNavigateForward: { navigateForward(in: .left) },
+                                onNavigateUp: { navigateUp(in: .left) },
+                                canPasteFromClipboard: { hasFilesInClipboard() },
+                                onPasteIntoPath: { destination in
+                                    activePane = .left
+                                    pasteFiles(destinationOverride: destination ?? leftPath)
+                                },
+                                onRecordMoveBatch: { title, pairs in
+                                    recordMovedItemsBatch(title: title, pairs: pairs)
+                                },
+                                onDisplayedURLsChange: { urls in
+                                    leftDisplayedURLs = urls
+                                },
+                                onFocus: {
+                                    activePane = .left
+                                }
+                            )
+                            .frame(maxWidth: .infinity)
+                            .onChange(of: leftSelection) { _, _ in
+                                onSelectionChange?(leftSelection)
                             }
-                        )
-                        .frame(maxWidth: .infinity)
-                        .onChange(of: leftSelection) { _, _ in
-                            onSelectionChange?(leftSelection)
+                            .onChange(of: leftPath) { oldValue, newValue in
+                                recordHistoryIfNeeded(for: .left, oldValue: oldValue, newValue: newValue)
+                                leftCurrentPathRaw = newValue.path
+                            }
+                            
                         }
-                        .onChange(of: leftPath) { oldValue, newValue in
-                            recordHistoryIfNeeded(for: .left, oldValue: oldValue, newValue: newValue)
-                            leftCurrentPathRaw = newValue.path
-                        }
-                        
+                        .id("left-pane-\(paneLayoutEpoch)")
+                        .frame(width: isSinglePaneMode ? remainingWidth : leftPaneWidth, alignment: .leading)
+                        .clipped()
                     }
-                    .frame(width: leftPaneWidth)
                     
-                    Rectangle()
-                        .fill(FolderiumTheme.separator(isSoftDark: softDarkThemeEnabled))
-                        .frame(width: 6)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 2)
-                                .onChanged { value in
-                                    let usableWidth = max(remainingWidth - 6, 300)
-                                    if paneSplitDragStartLeftWidth == nil {
-                                        paneSplitDragStartLeftWidth = leftPaneWidth
+                    if !isSinglePaneMode {
+                        Rectangle()
+                            .fill(FolderiumTheme.separator(isSoftDark: softDarkThemeEnabled))
+                            .frame(width: 6)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 2)
+                                    .onChanged { value in
+                                        let usableWidth = remainingWidth
+                                        if paneSplitDragStartLeftWidth == nil {
+                                            paneSplitDragStartLeftWidth = leftPaneWidth
+                                        }
+                                        let base = paneSplitDragStartLeftWidth ?? leftPaneWidth
+                                        let proposedLeft = base + value.translation.width
+                                        let clampedLeft = min(max(proposedLeft, 150), usableWidth - 150)
+                                        paneSplitRatio = clampedLeft / usableWidth
                                     }
-                                    let base = paneSplitDragStartLeftWidth ?? leftPaneWidth
-                                    let proposedLeft = base + value.translation.width
-                                    let clampedLeft = min(max(proposedLeft, 150), usableWidth - 150)
-                                    paneSplitRatio = clampedLeft / usableWidth
+                                    .onEnded { _ in
+                                        paneSplitDragStartLeftWidth = nil
+                                    }
+                            )
+                            .onTapGesture(count: 2) {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    paneSplitRatio = defaultPaneSplitRatio
                                 }
-                                .onEnded { _ in
-                                    paneSplitDragStartLeftWidth = nil
-                                }
-                        )
-                        .onTapGesture(count: 2) {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                paneSplitRatio = defaultPaneSplitRatio
                             }
-                        }
-                    
-                    VStack(spacing: 0) {
-                        FilePaneView(
-                            path: $rightPath,
-                            selection: $rightSelection,
-                            searchText: $rightSearchText,
-                            isSearching: $rightIsSearching,
-                            showHiddenFiles: showHiddenFiles,
-                            title: "Right Pane",
-                            isActive: activePane == .right,
-                            onOpenInTerminal: { openInTerminal(rightPath) },
-                            onRefresh: { refreshTrigger = UUID() },
-                            refreshTrigger: refreshTrigger,
-                            onBulkCompress: compressSelectedFiles,
-                            canNavigateBack: !rightBackHistory.isEmpty,
-                            canNavigateForward: !rightForwardHistory.isEmpty,
-                            onNavigateBack: { navigateBack(in: .right) },
-                            onNavigateForward: { navigateForward(in: .right) },
-                            onNavigateUp: { navigateUp(in: .right) },
-                            canPasteFromClipboard: { hasFilesInClipboard() },
-                            onPasteIntoPath: { destination in
-                                activePane = .right
-                                pasteFiles(destinationOverride: destination ?? rightPath)
-                            },
-                            onRecordMoveBatch: { title, pairs in
-                                recordMovedItemsBatch(title: title, pairs: pairs)
-                            },
-                            onDisplayedURLsChange: { urls in
-                                rightDisplayedURLs = urls
-                            },
-                            onFocus: {
-                                activePane = .right
-                            }
-                        )
-                        .frame(maxWidth: .infinity)
-                        .onChange(of: rightSelection) { _, _ in
-                            onSelectionChange?(rightSelection)
-                        }
-                        .onChange(of: rightPath) { oldValue, newValue in
-                            recordHistoryIfNeeded(for: .right, oldValue: oldValue, newValue: newValue)
-                            rightCurrentPathRaw = newValue.path
-                        }
-                        
                     }
-                    .frame(width: rightPaneWidth)
+                    
+                    if !isSinglePaneMode || activePane == .right {
+                        VStack(spacing: 0) {
+                            FilePaneView(
+                                path: $rightPath,
+                                selection: $rightSelection,
+                                searchText: $rightSearchText,
+                                isSearching: $rightIsSearching,
+                                showHiddenFiles: showHiddenFiles,
+                                title: "Right Pane",
+                                isActive: activePane == .right,
+                                onOpenInTerminal: { openInTerminal(rightPath) },
+                                onRefresh: { refreshTrigger = UUID() },
+                                refreshTrigger: refreshTrigger,
+                                onBulkCompress: compressSelectedFiles,
+                                canNavigateBack: !rightBackHistory.isEmpty,
+                                canNavigateForward: !rightForwardHistory.isEmpty,
+                                onNavigateBack: { navigateBack(in: .right) },
+                                onNavigateForward: { navigateForward(in: .right) },
+                                onNavigateUp: { navigateUp(in: .right) },
+                                canPasteFromClipboard: { hasFilesInClipboard() },
+                                onPasteIntoPath: { destination in
+                                    activePane = .right
+                                    pasteFiles(destinationOverride: destination ?? rightPath)
+                                },
+                                onRecordMoveBatch: { title, pairs in
+                                    recordMovedItemsBatch(title: title, pairs: pairs)
+                                },
+                                onDisplayedURLsChange: { urls in
+                                    rightDisplayedURLs = urls
+                                },
+                                onFocus: {
+                                    activePane = .right
+                                }
+                            )
+                            .frame(maxWidth: .infinity)
+                            .onChange(of: rightSelection) { _, _ in
+                                onSelectionChange?(rightSelection)
+                            }
+                            .onChange(of: rightPath) { oldValue, newValue in
+                                recordHistoryIfNeeded(for: .right, oldValue: oldValue, newValue: newValue)
+                                rightCurrentPathRaw = newValue.path
+                            }
+                            
+                        }
+                        .id("right-pane-\(paneLayoutEpoch)")
+                        .frame(width: isSinglePaneMode ? remainingWidth : rightPaneWidth, alignment: .leading)
+                        .clipped()
+                    }
                 }
+                .clipped()
             }
         }
         .background(FolderiumTheme.windowBackground(isSoftDark: softDarkThemeEnabled))
@@ -490,6 +507,19 @@ struct DualPaneView: View {
             if sanitized != pinnedPaths {
                 pinnedPaths = sanitized
             }
+        }
+        .onChange(of: isSinglePaneMode) { _, _ in
+            // Returning from preview mode should restore balanced dual-pane layout.
+            if !isSinglePaneMode {
+                paneSplitRatio = defaultPaneSplitRatio
+            }
+            paneLayoutEpoch += 1
+            refreshTrigger = UUID()
+        }
+        .onChange(of: showNavigationPane) { _, _ in
+            // Apply the same stable-reset approach as preview toggling.
+            paneLayoutEpoch += 1
+            refreshTrigger = UUID()
         }
     }
     
@@ -1588,7 +1618,7 @@ struct FilePaneView: View {
             .name: 360,
             .type: 130,
             .size: 70,
-            .modified: 112
+            .modified: 124
         ]
 
         var title: String {
@@ -1605,7 +1635,7 @@ struct FilePaneView: View {
             case .name: return 180
             case .type: return 120
             case .size: return 64
-            case .modified: return 102
+            case .modified: return 110
             }
         }
     }
@@ -1671,12 +1701,9 @@ struct FilePaneView: View {
                 Color.clear
                     .onAppear {
                         tableWidth = geometry.size.width
-                        normalizeColumnWidthsToPaneWidth()
                     }
                     .onChange(of: geometry.size.width) { _, newWidth in
                         tableWidth = newWidth
-                        normalizeColumnWidthsToPaneWidth()
-                        saveColumnLayout()
                     }
             }
         )
@@ -2086,14 +2113,11 @@ struct FilePaneView: View {
             ForEach(Array(visibleColumns.enumerated()), id: \.element) { index, column in
                 columnHeaderButton(for: column)
                     .frame(width: effectiveColumnWidth(for: column), alignment: .leading)
-
-                if index < visibleColumns.count - 1 {
-                    columnResizeHandle(for: column)
-                }
             }
 
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(FolderiumTheme.controlBackground(isSoftDark: softDarkThemeEnabled))
@@ -2110,23 +2134,19 @@ struct FilePaneView: View {
     }
 
     private func effectiveColumnWidth(for column: FileColumn) -> CGFloat {
-        let baseWidth = columnWidth(for: column)
-        let fillColumn = visibleColumns.contains(.name) ? FileColumn.name : visibleColumns.first
-        guard let fillColumn, fillColumn == column else {
-            return baseWidth
-        }
-
-        let usedByOthers = visibleColumns
-            .filter { $0 != column }
-            .reduce(CGFloat(0)) { partial, item in
-                partial + columnWidth(for: item)
-            }
-        let remaining = max(availableWidthForColumns() - usedByOthers, baseWidth)
-        return remaining
+        resolvedColumnWidths()[column] ?? columnWidth(for: column)
     }
 
     private func availableWidthForColumns() -> CGFloat {
-        guard tableWidth > 0 else { return 10_000 }
+        guard tableWidth > 0 else {
+            // During layout transitions (e.g. toggling navigation/preview), tableWidth can
+            // be temporarily zero. Returning a huge value here causes oversized columns that
+            // visually clip from pane edges. Keep this bounded to minimum viable width.
+            let minVisibleWidth = visibleColumns.reduce(CGFloat(0)) { partial, column in
+                partial + column.minWidth
+            }
+            return max(minVisibleWidth, 120)
+        }
         let separators = CGFloat(max(visibleColumns.count - 1, 0)) * 5
         let reservedHorizontalPadding: CGFloat = 24 // 12 left + 12 right
         return max(tableWidth - reservedHorizontalPadding - separators, 120)
@@ -2134,38 +2154,74 @@ struct FilePaneView: View {
 
     private func maxAllowedWidth(for column: FileColumn) -> CGFloat {
         let otherVisible = visibleColumns.filter { $0 != column }
-        let otherWidths = otherVisible.reduce(CGFloat(0)) { $0 + columnWidth(for: $1) }
-        let maxForCurrent = availableWidthForColumns() - otherWidths
+        let otherMinWidths = otherVisible.reduce(CGFloat(0)) { $0 + $1.minWidth }
+        let maxForCurrent = availableWidthForColumns() - otherMinWidths
         return max(column.minWidth, maxForCurrent)
     }
 
-    private func normalizeColumnWidthsToPaneWidth() {
-        guard !visibleColumns.isEmpty else { return }
+    private func resolvedColumnWidths() -> [FileColumn: CGFloat] {
+        guard !visibleColumns.isEmpty else { return [:] }
+        
+        let available = availableWidthForColumns()
+        let weightBase: [FileColumn: CGFloat] = [
+            .name: 6.0,
+            .type: 2.1,
+            .size: 1.4,
+            .modified: 2.5
+        ]
+        let floorBase: [FileColumn: CGFloat] = [
+            .name: 120,
+            .type: 80,
+            .size: 58,
+            .modified: 102
+        ]
 
-        var adjusted = columnWidths
-        let totalVisibleWidth = visibleColumns.reduce(CGFloat(0)) {
-            $0 + (adjusted[$1] ?? FileColumn.defaultWidths[$1] ?? 120)
+        let weightSum = visibleColumns.reduce(CGFloat(0)) { $0 + (weightBase[$1] ?? 1) }
+        guard weightSum > 0 else { return [:] }
+
+        var resolved: [FileColumn: CGFloat] = [:]
+        for column in visibleColumns {
+            let proportional = available * (weightBase[column] ?? 1) / weightSum
+            let floor = floorBase[column] ?? 48
+            resolved[column] = max(proportional, floor)
         }
-        let maxTotal = availableWidthForColumns()
-        guard totalVisibleWidth > maxTotal else { return }
 
-        var remainingOverflow = totalVisibleWidth - maxTotal
-        let reduceOrder = visibleColumns.sorted {
-            (adjusted[$0] ?? FileColumn.defaultWidths[$0] ?? 120) >
-            (adjusted[$1] ?? FileColumn.defaultWidths[$1] ?? 120)
+        var total = visibleColumns.reduce(CGFloat(0)) { $0 + (resolved[$1] ?? 0) }
+
+        if total > available {
+            var overflow = total - available
+            let shrinkOrder = visibleColumns.sorted { lhs, rhs in
+                (resolved[lhs] ?? 0) > (resolved[rhs] ?? 0)
+            }
+
+            for column in shrinkOrder where overflow > 0 {
+                let floor = floorBase[column] ?? 48
+                let current = resolved[column] ?? floor
+                let reducible = max(current - floor, 0)
+                guard reducible > 0 else { continue }
+                let reduction = min(reducible, overflow)
+                resolved[column] = current - reduction
+                overflow -= reduction
+            }
+
+            total = visibleColumns.reduce(CGFloat(0)) { $0 + (resolved[$1] ?? 0) }
         }
 
-        for column in reduceOrder where remainingOverflow > 0 {
-            let current = adjusted[column] ?? FileColumn.defaultWidths[column] ?? 120
-            let reducible = max(current - column.minWidth, 0)
-            guard reducible > 0 else { continue }
-
-            let reduction = min(reducible, remainingOverflow)
-            adjusted[column] = current - reduction
-            remainingOverflow -= reduction
+        if total > available, total > 0 {
+            let hardFloor: CGFloat = 40
+            let scale = max(available / total, 0)
+            for column in visibleColumns {
+                resolved[column] = max((resolved[column] ?? hardFloor) * scale, hardFloor)
+            }
+            total = visibleColumns.reduce(CGFloat(0)) { $0 + (resolved[$1] ?? hardFloor) }
         }
 
-        columnWidths = adjusted
+        if total < available {
+            let fillColumn = visibleColumns.contains(.name) ? FileColumn.name : visibleColumns.first!
+            resolved[fillColumn, default: floorBase[fillColumn] ?? 48] += (available - total)
+        }
+
+        return resolved
     }
 
     private func sortOrder(for column: FileColumn) -> SortOrder {
@@ -2265,7 +2321,7 @@ struct FilePaneView: View {
                         ),
                         visibleColumns: visibleColumns,
                         columnWidths: columnWidths,
-                        availableColumnsWidth: availableWidthForColumns(),
+                        resolvedColumnWidths: resolvedColumnWidths(),
                         onSelectWithModifiers: { isCommand, isShift in
                             handleRowClick(file.url, isCommandPressed: isCommand, isShiftPressed: isShift)
                         },
@@ -2292,7 +2348,9 @@ struct FilePaneView: View {
                     )
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { providers in
             handleDrop(providers: providers, destinationFolder: nil)
         }
@@ -2368,7 +2426,6 @@ struct FilePaneView: View {
         } else {
             hiddenColumns.insert(column)
         }
-        normalizeColumnWidthsToPaneWidth()
         saveColumnLayout()
     }
 
@@ -2376,7 +2433,6 @@ struct FilePaneView: View {
         columnOrder = FileColumn.defaultOrder
         hiddenColumns = FileColumn.defaultHidden
         columnWidths = FileColumn.defaultWidths
-        normalizeColumnWidthsToPaneWidth()
         saveColumnLayout()
     }
 
@@ -2410,7 +2466,6 @@ struct FilePaneView: View {
             }
         }
         columnWidths = newWidths
-        normalizeColumnWidthsToPaneWidth()
     }
 
     private func saveColumnLayout() {
@@ -3274,7 +3329,7 @@ struct FileRowView: View {
     @Binding var inlineRenameText: String
     let visibleColumns: [FilePaneView.FileColumn]
     let columnWidths: [FilePaneView.FileColumn: CGFloat]
-    let availableColumnsWidth: CGFloat
+    let resolvedColumnWidths: [FilePaneView.FileColumn: CGFloat]
     let onSelectWithModifiers: (Bool, Bool) -> Void
     let onDoubleClick: () -> Void
     let onCommitInlineRename: () -> Void
@@ -3308,10 +3363,12 @@ struct FileRowView: View {
 
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(backgroundColor)
         .contentShape(Rectangle())
+        .clipped()
         .overlay {
             RowMouseCaptureView { event in
                 let modifierFlags = event.modifierFlags
@@ -3377,18 +3434,11 @@ struct FileRowView: View {
     }
 
     private func width(for column: FilePaneView.FileColumn) -> CGFloat {
+        if let resolved = resolvedColumnWidths[column] {
+            return max(resolved, column.minWidth)
+        }
         let defaultWidth = FilePaneView.FileColumn.defaultWidths[column] ?? 120
-        let baseWidth = max(columnWidths[column] ?? defaultWidth, column.minWidth)
-        let fillColumn = visibleColumns.contains(.name) ? FilePaneView.FileColumn.name : visibleColumns.first
-        guard let fillColumn, fillColumn == column else {
-            return baseWidth
-        }
-
-        let usedByOthers = visibleColumns.filter { $0 != column }.reduce(CGFloat(0)) { partial, item in
-            let itemDefault = FilePaneView.FileColumn.defaultWidths[item] ?? 120
-            return partial + max(columnWidths[item] ?? itemDefault, item.minWidth)
-        }
-        return max(availableColumnsWidth - usedByOthers, baseWidth)
+        return max(columnWidths[column] ?? defaultWidth, column.minWidth)
     }
 
     @ViewBuilder
