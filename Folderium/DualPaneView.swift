@@ -753,7 +753,7 @@ struct DualPaneView: View {
                         do {
                             for url in urls {
                                 let destinationURL = targetDirectory.appendingPathComponent(url.lastPathComponent)
-                                let finalDestinationURL = await resolveConflictDestination(
+                                let finalDestinationURL = resolveConflictDestination(
                                     sourceURL: url,
                                     destinationURL: destinationURL,
                                     in: targetDirectory
@@ -853,12 +853,12 @@ struct DualPaneView: View {
             case keepBoth
         }
         
-        private func resolveConflictDestination(sourceURL: URL, destinationURL: URL, in directory: URL) async -> URL? {
+        private func resolveConflictDestination(sourceURL: URL, destinationURL: URL, in directory: URL) -> URL? {
             guard FileManager.default.fileExists(atPath: destinationURL.path) else {
                 return destinationURL
             }
             
-            let choice = await askConflictChoice(sourceURL: sourceURL, destinationURL: destinationURL)
+            let choice = askConflictChoice(sourceURL: sourceURL, destinationURL: destinationURL)
             switch choice {
             case .skip:
                 return nil
