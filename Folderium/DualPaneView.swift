@@ -32,9 +32,9 @@ struct DraggableModifier: ViewModifier {
 struct DualPaneView: View {
     private let defaultQuickAccessWidth: CGFloat = 190
     private let defaultPaneSplitRatio: CGFloat = 0.5
-    @AppStorage("folderium.windowsFamiliarMode") private var windowsFamiliarMode: Bool = true
-    @AppStorage("folderium.showWindowsOnboarding") private var showWindowsOnboarding: Bool = true
     @AppStorage("folderium.pinnedPaths") private var pinnedPathsRaw: String = ""
+    @AppStorage("folderium.leftCurrentPath") private var leftCurrentPathRaw: String = ""
+    @AppStorage("folderium.rightCurrentPath") private var rightCurrentPathRaw: String = ""
     @AppStorage("folderium.filePaneColumnsLayout") private var columnLayoutRaw: String = ""
     @AppStorage(ShortcutStore.storageKey) private var shortcutsRaw: String = ""
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
@@ -190,25 +190,6 @@ struct DualPaneView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            if windowsFamiliarMode && showWindowsOnboarding {
-                HStack {
-                    Image(systemName: "lightbulb")
-                        .foregroundColor(.yellow)
-                    Text("Windows Familiar Mode is on: use F2 to rename, Back/Forward/Up to navigate, and Explorer-style context menus.")
-                        .font(.caption)
-                    Spacer()
-                    Button("Dismiss") {
-                        showWindowsOnboarding = false
-                    }
-                    .buttonStyle(.borderless)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.accentColor.opacity(0.12))
-                
-                Divider()
-            }
-            
             HStack(spacing: 8) {
                 explorerToolbarButton("Open Left", systemImage: "folder.badge.plus") { selectFolder(for: .left) }
                 explorerToolbarButton("Open Right", systemImage: "folder.badge.plus") { selectFolder(for: .right) }
@@ -338,6 +319,7 @@ struct DualPaneView: View {
                         }
                         .onChange(of: leftPath) { oldValue, newValue in
                             recordHistoryIfNeeded(for: .left, oldValue: oldValue, newValue: newValue)
+                            leftCurrentPathRaw = newValue.path
                         }
                         
                     }
@@ -397,6 +379,7 @@ struct DualPaneView: View {
                         }
                         .onChange(of: rightPath) { oldValue, newValue in
                             recordHistoryIfNeeded(for: .right, oldValue: oldValue, newValue: newValue)
+                            rightCurrentPathRaw = newValue.path
                         }
                         
                     }
@@ -419,11 +402,17 @@ struct DualPaneView: View {
             }
         }
         .onAppear {
+            var didRestoreAnyBookmark = false
             if let restoredLeftPath = SandboxAccessManager.restoreBookmark(for: .left) {
-                leftPath = restoredLeftPath
+                leftPath = resolveRestoredPath(savedPathRaw: leftCurrentPathRaw, fallbackRoot: restoredLeftPath)
+                didRestoreAnyBookmark = true
             }
             if let restoredRightPath = SandboxAccessManager.restoreBookmark(for: .right) {
-                rightPath = restoredRightPath
+                rightPath = resolveRestoredPath(savedPathRaw: rightCurrentPathRaw, fallbackRoot: restoredRightPath)
+                didRestoreAnyBookmark = true
+            }
+            if !didRestoreAnyBookmark {
+                promptForInitialDownloadsAccess()
             }
             activeShortcutBindings = ShortcutStore.load(from: shortcutsRaw)
             startShortcutMonitor()
@@ -680,14 +669,57 @@ struct DualPaneView: View {
             switch pane {
             case .left:
                 leftPath = selectedURL
+                leftCurrentPathRaw = selectedURL.path
                 SandboxAccessManager.saveBookmark(for: .left, url: selectedURL)
             case .right:
                 rightPath = selectedURL
+                rightCurrentPathRaw = selectedURL.path
                 SandboxAccessManager.saveBookmark(for: .right, url: selectedURL)
             }
         }
     }
-    
+
+    private func resolveRestoredPath(savedPathRaw: String, fallbackRoot: URL) -> URL {
+        guard !savedPathRaw.isEmpty else { return fallbackRoot }
+        let candidate = URL(fileURLWithPath: savedPathRaw)
+        guard candidate.path == fallbackRoot.path || candidate.path.hasPrefix(fallbackRoot.path + "/") else {
+            return fallbackRoot
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              FileManager.default.isReadableFile(atPath: candidate.path) else {
+            return fallbackRoot
+        }
+        return candidate
+    }
+
+    private func promptForInitialDownloadsAccess() {
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory())
+
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = downloads
+        panel.prompt = "Allow Access"
+        panel.message = "Grant Folderium access to your Downloads folder."
+
+        guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
+        guard selectedURL.startAccessingSecurityScopedResource() else {
+            print("Failed to access initial startup folder: \(selectedURL.path)")
+            return
+        }
+
+        leftPath = selectedURL
+        rightPath = selectedURL
+        leftCurrentPathRaw = selectedURL.path
+        rightCurrentPathRaw = selectedURL.path
+        SandboxAccessManager.saveBookmark(for: .left, url: selectedURL)
+        SandboxAccessManager.saveBookmark(for: .right, url: selectedURL)
+    }
+
     private func recordHistoryIfNeeded(for pane: ActivePane, oldValue: URL, newValue: URL) {
         guard oldValue != newValue else { return }
         
@@ -2728,14 +2760,8 @@ enum PaneBookmarkKey: String {
 enum SandboxAccessManager {
     private static let leftBookmarkKey = "folderium.bookmark.left"
     private static let rightBookmarkKey = "folderium.bookmark.right"
-    static let defaultDirectory: URL = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        let folderiumRoot = base.appendingPathComponent("Folderium", isDirectory: true)
-        let startupFolder = folderiumRoot.appendingPathComponent("Startup", isDirectory: true)
-        try? FileManager.default.createDirectory(at: startupFolder, withIntermediateDirectories: true)
-        return startupFolder
-    }()
+    static let defaultDirectory = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        ?? URL(fileURLWithPath: NSHomeDirectory())
     
     static func saveBookmark(for pane: PaneBookmarkKey, url: URL) {
         do {

@@ -6,7 +6,7 @@
 		<title>Folderium - Modern File Manager for macOS</title>
 		<meta
 			name="description"
-			content="A native macOS dual-pane file manager with Explorer-style familiarity mode, resizable panes, conflict dialogs, and built-in terminal support." />
+			content="A native macOS dual-pane file manager with Explorer-style workflow, resizable panes, conflict dialogs, and native Terminal integration." />
 		<link rel="icon" type="image/svg+xml" href="folderium-logo.svg" />
 		<link rel="alternate icon" href="folderium-logo.svg" />
 		<script src="https://cdn.tailwindcss.com"></script>
@@ -134,8 +134,8 @@
 					</div>
 					<h1 class="text-4xl md:text-6xl font-bold text-gray-900 mb-6">Folderium</h1>
 					<p class="text-xl md:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto">
-						A native macOS file manager with dual-pane workflow and Windows Explorer familiarity mode.
-						Built entirely with Swift and SwiftUI.
+						A native macOS file manager with dual-pane workflow and Windows Explorer-style interactions by
+						default. Built entirely with Swift and SwiftUI.
 					</p>
 					<div class="flex flex-col sm:flex-row gap-4 justify-center">
 						<a
@@ -208,20 +208,20 @@
 						</div>
 						<h3 class="text-xl font-bold text-gray-900 mb-4">Archive Support</h3>
 						<p class="text-gray-600">
-							Create ZIP/TAR/GZIP/BZIP2 archives and extract/list ZIP/TAR/GZIP/BZIP2 using native system
-							tools.
+							Create ZIP/TAR/GZIP/BZIP2 archives, auto-extract TAR.GZ/TAR.BZ2, and support 7Z/RAR
+							extraction when system tools are available.
 						</p>
 					</div>
 
-					<!-- Windows Familiarity -->
+					<!-- Explorer-Style Workflow -->
 					<div class="bg-folderium-light-gray rounded-xl p-8 hover:shadow-lg transition-shadow">
 						<div class="bg-folderium-blue rounded-lg w-16 h-16 flex items-center justify-center mb-6">
 							<i class="fas fa-window-restore text-white text-2xl"></i>
 						</div>
-						<h3 class="text-xl font-bold text-gray-900 mb-4">Windows Familiarity Mode</h3>
+						<h3 class="text-xl font-bold text-gray-900 mb-4">Explorer-Style Workflow</h3>
 						<p class="text-gray-600">
-							Explorer-style toolbar and context menus, Quick Access/sidebar navigation, and F2 rename
-							for easy switching from Windows.
+							Explorer-style toolbar and context menus, Quick Access/sidebar navigation, and Shift+F2
+							rename for easy switching from Windows.
 						</p>
 					</div>
 
@@ -232,7 +232,7 @@
 						</div>
 						<h3 class="text-xl font-bold text-gray-900 mb-4">Resizable Workspace</h3>
 						<p class="text-gray-600">
-							Resize the preview pane, sidebar, left/right pane split, and terminal heights with draggable
+							Resize the preview pane, sidebar, left/right pane split, and file columns with draggable
 							splitters and double-click reset.
 						</p>
 					</div>

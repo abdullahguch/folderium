@@ -280,8 +280,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
-            // Create a new window when clicking the dock icon if no windows are visible
-            openNewWindow()
+            // Avoid creating a duplicate window on Dock click.
+            // Let the SwiftUI WindowGroup reopen its scene.
+            sender.activate(ignoringOtherApps: true)
         }
         return true
     }
@@ -418,7 +419,6 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
 }
 
 struct SettingsView: View {
-    @AppStorage("folderium.windowsFamiliarMode") private var windowsFamiliarMode: Bool = true
     @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
     @AppStorage("folderium.globalFontSize") private var globalFontSize: Double = 12
     @AppStorage(ShortcutStore.storageKey) private var shortcutsRaw: String = ""
@@ -431,12 +431,6 @@ struct SettingsView: View {
                     .font(.title)
                 
                 Text("Privacy-focused file manager for macOS")
-                    .foregroundColor(.secondary)
-                
-                Toggle("Windows Familiar Mode", isOn: $windowsFamiliarMode)
-                
-                Text("When enabled, Folderium prioritizes File Explorer-like labels and interactions.")
-                    .font(.caption)
                     .foregroundColor(.secondary)
 
                 Divider()
