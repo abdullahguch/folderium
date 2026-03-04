@@ -15,8 +15,45 @@ class ArchiveManager: ObservableObject {
     }
     
     func getArchiveFormat(for url: URL) -> ArchiveFormat? {
+        let lowerName = url.lastPathComponent.lowercased()
+        if lowerName.hasSuffix(".tar.gz") || lowerName.hasSuffix(".tgz") {
+            return .gzip
+        }
+        if lowerName.hasSuffix(".tar.bz2") || lowerName.hasSuffix(".tbz2") || lowerName.hasSuffix(".tbz") {
+            return .bzip2
+        }
+
         let pathExtension = url.pathExtension.lowercased()
         return ArchiveFormat.allCases.first { $0.fileExtensions.contains(pathExtension) }
+    }
+
+    func archiveSupportInfo(for url: URL) -> ArchiveSupportInfo {
+        guard let format = getArchiveFormat(for: url) else {
+            return ArchiveSupportInfo(isArchive: false, formatLabel: "Not Archive", canExtract: false, detail: "Not an archive")
+        }
+
+        switch format {
+        case .zip, .tar, .gzip, .bzip2:
+            return ArchiveSupportInfo(isArchive: true, formatLabel: format.rawValue, canExtract: true, detail: "Supported")
+        case .sevenZip:
+            let available = Self.sevenZipExecutable() != nil || Self.bsdtarExecutable() != nil
+            return ArchiveSupportInfo(
+                isArchive: true,
+                formatLabel: format.rawValue,
+                canExtract: available,
+                detail: available ? "Supported" : "Install p7zip (7z/7zz) to extract"
+            )
+        case .rar:
+            let available = Self.unrarExecutable() != nil || Self.sevenZipExecutable() != nil || Self.bsdtarExecutable() != nil
+            return ArchiveSupportInfo(
+                isArchive: true,
+                formatLabel: format.rawValue,
+                canExtract: available,
+                detail: available ? "Supported" : "Install unrar or p7zip to extract"
+            )
+        case .iso, .cab, .lzh:
+            return ArchiveSupportInfo(isArchive: true, formatLabel: format.rawValue, canExtract: false, detail: "Unsupported")
+        }
     }
     
     // MARK: - Archive Operations
@@ -280,6 +317,10 @@ class ArchiveManager: ObservableObject {
                     if process.terminationStatus == 0 {
                         let data = pipe.fileHandleForReading.readDataToEndOfFile()
                         try data.write(to: outputFile)
+                        if Self.isTarGzipArchive(archiveURL) {
+                            _ = try Self.runProcess(executablePath: "/usr/bin/tar", arguments: ["-xf", outputFile.path, "-C", destinationURL.path])
+                            try? FileManager.default.removeItem(at: outputFile)
+                        }
                         continuation.resume()
                     } else {
                         let data = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -333,6 +374,10 @@ class ArchiveManager: ObservableObject {
                     if process.terminationStatus == 0 {
                         let data = pipe.fileHandleForReading.readDataToEndOfFile()
                         try data.write(to: outputFile)
+                        if Self.isTarBzip2Archive(archiveURL) {
+                            _ = try Self.runProcess(executablePath: "/usr/bin/tar", arguments: ["-xf", outputFile.path, "-C", destinationURL.path])
+                            try? FileManager.default.removeItem(at: outputFile)
+                        }
                         continuation.resume()
                     } else {
                         let data = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -364,11 +409,32 @@ class ArchiveManager: ObservableObject {
     // MARK: - Placeholder implementations for other formats
     
     private func extract7Z(_ archiveURL: URL, to destinationURL: URL) async throws {
-        throw ArchiveError.unsupportedFormat
+        if let sevenZip = Self.sevenZipExecutable() {
+            _ = try Self.runProcess(executablePath: sevenZip, arguments: ["x", archiveURL.path, "-o\(destinationURL.path)", "-y"])
+            return
+        }
+        if let bsdtar = Self.bsdtarExecutable() {
+            _ = try Self.runProcess(executablePath: bsdtar, arguments: ["-xf", archiveURL.path, "-C", destinationURL.path])
+            return
+        }
+        throw ArchiveError.unsupportedFormatWithHint("7Z extraction requires p7zip (7z/7zz).")
     }
     
     private func extractRAR(_ archiveURL: URL, to destinationURL: URL) async throws {
-        throw ArchiveError.unsupportedFormat
+        if let unrar = Self.unrarExecutable() {
+            let destinationWithSlash = destinationURL.path.hasSuffix("/") ? destinationURL.path : destinationURL.path + "/"
+            _ = try Self.runProcess(executablePath: unrar, arguments: ["x", "-o+", archiveURL.path, destinationWithSlash])
+            return
+        }
+        if let sevenZip = Self.sevenZipExecutable() {
+            _ = try Self.runProcess(executablePath: sevenZip, arguments: ["x", archiveURL.path, "-o\(destinationURL.path)", "-y"])
+            return
+        }
+        if let bsdtar = Self.bsdtarExecutable() {
+            _ = try Self.runProcess(executablePath: bsdtar, arguments: ["-xf", archiveURL.path, "-C", destinationURL.path])
+            return
+        }
+        throw ArchiveError.unsupportedFormatWithHint("RAR extraction requires unrar or p7zip (7z/7zz).")
     }
     
     private func extractISO(_ archiveURL: URL, to destinationURL: URL) async throws {
@@ -384,11 +450,31 @@ class ArchiveManager: ObservableObject {
     }
     
     private func list7ZContents(_ archiveURL: URL) async throws -> [ArchiveItem] {
-        throw ArchiveError.unsupportedFormat
+        if let sevenZip = Self.sevenZipExecutable() {
+            let output = try Self.runProcess(executablePath: sevenZip, arguments: ["l", "-slt", archiveURL.path])
+            return parse7zStructuredListOutput(output)
+        }
+        if let bsdtar = Self.bsdtarExecutable() {
+            let output = try Self.runProcess(executablePath: bsdtar, arguments: ["-tf", archiveURL.path])
+            return parseTARListOutput(output)
+        }
+        throw ArchiveError.unsupportedFormatWithHint("7Z listing requires p7zip (7z/7zz).")
     }
     
     private func listRARContents(_ archiveURL: URL) async throws -> [ArchiveItem] {
-        throw ArchiveError.unsupportedFormat
+        if let unrar = Self.unrarExecutable() {
+            let output = try Self.runProcess(executablePath: unrar, arguments: ["lb", archiveURL.path])
+            return parseSimpleFileListOutput(output)
+        }
+        if let sevenZip = Self.sevenZipExecutable() {
+            let output = try Self.runProcess(executablePath: sevenZip, arguments: ["l", "-slt", archiveURL.path])
+            return parse7zStructuredListOutput(output)
+        }
+        if let bsdtar = Self.bsdtarExecutable() {
+            let output = try Self.runProcess(executablePath: bsdtar, arguments: ["-tf", archiveURL.path])
+            return parseTARListOutput(output)
+        }
+        throw ArchiveError.unsupportedFormatWithHint("RAR listing requires unrar or p7zip (7z/7zz).")
     }
     
     private func listISOContents(_ archiveURL: URL) async throws -> [ArchiveItem] {
@@ -469,6 +555,99 @@ class ArchiveManager: ObservableObject {
         
         return items
     }
+
+    private func parseSimpleFileListOutput(_ output: String) -> [ArchiveItem] {
+        output
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { name in
+                ArchiveItem(name: name, size: 0, isDirectory: name.hasSuffix("/"), modificationDate: nil)
+            }
+    }
+
+    private func parse7zStructuredListOutput(_ output: String) -> [ArchiveItem] {
+        var items: [ArchiveItem] = []
+        let lines = output.components(separatedBy: .newlines)
+        var currentPath: String?
+        var currentSize: Int64 = 0
+        var currentAttributes: String = ""
+        var currentModified: Date?
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        func flush() {
+            guard let path = currentPath, !path.isEmpty else { return }
+            let isDirectory = currentAttributes.contains("D_")
+            items.append(ArchiveItem(name: path, size: currentSize, isDirectory: isDirectory, modificationDate: currentModified))
+            currentPath = nil
+            currentSize = 0
+            currentAttributes = ""
+            currentModified = nil
+        }
+
+        for line in lines {
+            if line.hasPrefix("Path = ") {
+                flush()
+                currentPath = String(line.dropFirst("Path = ".count))
+            } else if line.hasPrefix("Size = ") {
+                currentSize = Int64(String(line.dropFirst("Size = ".count))) ?? 0
+            } else if line.hasPrefix("Attributes = ") {
+                currentAttributes = String(line.dropFirst("Attributes = ".count))
+            } else if line.hasPrefix("Modified = ") {
+                let value = String(line.dropFirst("Modified = ".count))
+                currentModified = formatter.date(from: value)
+            }
+        }
+        flush()
+
+        return items
+    }
+
+    private static func runProcess(executablePath: String, arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+        try process.run()
+        process.waitUntilExit()
+
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        if process.terminationStatus != 0 {
+            throw ArchiveError.extractionFailed(output.isEmpty ? "Command failed with exit code \(process.terminationStatus)" : output)
+        }
+        return output
+    }
+
+    private static func isTarGzipArchive(_ url: URL) -> Bool {
+        let name = url.lastPathComponent.lowercased()
+        return name.hasSuffix(".tar.gz") || name.hasSuffix(".tgz")
+    }
+
+    private static func isTarBzip2Archive(_ url: URL) -> Bool {
+        let name = url.lastPathComponent.lowercased()
+        return name.hasSuffix(".tar.bz2") || name.hasSuffix(".tbz2") || name.hasSuffix(".tbz")
+    }
+
+    private static func firstAvailableExecutable(_ candidates: [String]) -> String? {
+        candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
+    }
+
+    private static func sevenZipExecutable() -> String? {
+        firstAvailableExecutable(["/opt/homebrew/bin/7zz", "/opt/homebrew/bin/7z", "/usr/local/bin/7z", "/usr/bin/7z"])
+    }
+
+    private static func unrarExecutable() -> String? {
+        firstAvailableExecutable(["/opt/homebrew/bin/unrar", "/usr/local/bin/unrar", "/usr/bin/unrar"])
+    }
+
+    private static func bsdtarExecutable() -> String? {
+        firstAvailableExecutable(["/usr/bin/bsdtar"])
+    }
 }
 
 // MARK: - Data Models
@@ -545,6 +724,13 @@ struct ArchiveItem: Identifiable, Hashable {
             return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
         }
     }
+}
+
+struct ArchiveSupportInfo {
+    let isArchive: Bool
+    let formatLabel: String
+    let canExtract: Bool
+    let detail: String
 }
 
 // MARK: - Compression Methods
@@ -769,6 +955,7 @@ extension ArchiveManager {
 
 enum ArchiveError: LocalizedError {
     case unsupportedFormat
+    case unsupportedFormatWithHint(String)
     case extractionFailed(String)
     case creationFailed(String)
     case listingFailed(String)
@@ -777,6 +964,8 @@ enum ArchiveError: LocalizedError {
         switch self {
         case .unsupportedFormat:
             return "Unsupported archive format"
+        case .unsupportedFormatWithHint(let message):
+            return message
         case .extractionFailed(let message):
             return "Extraction failed: \(message)"
         case .creationFailed(let message):

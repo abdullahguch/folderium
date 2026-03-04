@@ -1,4 +1,218 @@
 import SwiftUI
+import AppKit
+
+enum FolderiumTheme {
+    static let softDarkWindow = Color(red: 0.16, green: 0.18, blue: 0.21)
+    static let softDarkControl = Color(red: 0.20, green: 0.22, blue: 0.26)
+    static let softDarkCard = Color(red: 0.23, green: 0.25, blue: 0.30)
+    static let softDarkSeparator = Color(red: 0.34, green: 0.37, blue: 0.43)
+    static let softDarkStripe = Color.white.opacity(0.04)
+
+    static func windowBackground(isSoftDark: Bool) -> Color {
+        isSoftDark ? softDarkWindow : Color(NSColor.windowBackgroundColor)
+    }
+
+    static func controlBackground(isSoftDark: Bool) -> Color {
+        isSoftDark ? softDarkControl : Color(NSColor.controlBackgroundColor)
+    }
+
+    static func cardBackground(isSoftDark: Bool) -> Color {
+        isSoftDark ? softDarkCard : Color(NSColor.windowBackgroundColor)
+    }
+
+    static func separator(isSoftDark: Bool) -> Color {
+        isSoftDark ? softDarkSeparator : Color(NSColor.separatorColor)
+    }
+
+    static func stripedRowBackground(isSoftDark: Bool) -> Color {
+        isSoftDark ? softDarkStripe : Color(NSColor.controlBackgroundColor).opacity(0.5)
+    }
+}
+
+enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
+    case newWindow
+    case renameSelected
+    case copySelected
+    case cutSelected
+    case pasteIntoActivePane
+    case deleteSelected
+    case compressSelected
+    case refreshActivePane
+    case openTerminalActivePane
+    case navigateBackActivePane
+    case navigateForwardActivePane
+    case navigateUpActivePane
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .newWindow: return "New Window"
+        case .renameSelected: return "Rename Selected Item"
+        case .copySelected: return "Copy Selection"
+        case .cutSelected: return "Cut Selection"
+        case .pasteIntoActivePane: return "Paste Into Active Pane"
+        case .deleteSelected: return "Delete Selection"
+        case .compressSelected: return "Compress Selection"
+        case .refreshActivePane: return "Refresh Active Pane"
+        case .openTerminalActivePane: return "Open Active Pane in Terminal"
+        case .navigateBackActivePane: return "Navigate Back (Active Pane)"
+        case .navigateForwardActivePane: return "Navigate Forward (Active Pane)"
+        case .navigateUpActivePane: return "Navigate Up (Active Pane)"
+        }
+    }
+}
+
+struct ShortcutBinding: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var action: ShortcutAction
+    var combo: String
+    var isEnabled: Bool = true
+}
+
+enum ShortcutStore {
+    static let storageKey = "folderium.shortcuts.v1"
+
+    static var defaultBindings: [ShortcutBinding] {
+        [
+            ShortcutBinding(action: .newWindow, combo: "cmd+n"),
+            ShortcutBinding(action: .renameSelected, combo: "f2"),
+            ShortcutBinding(action: .copySelected, combo: "cmd+c"),
+            ShortcutBinding(action: .cutSelected, combo: "cmd+x"),
+            ShortcutBinding(action: .pasteIntoActivePane, combo: "cmd+v"),
+            ShortcutBinding(action: .deleteSelected, combo: "delete"),
+            ShortcutBinding(action: .compressSelected, combo: "space"),
+            ShortcutBinding(action: .refreshActivePane, combo: "cmd+r"),
+            ShortcutBinding(action: .openTerminalActivePane, combo: "cmd+t"),
+            ShortcutBinding(action: .navigateBackActivePane, combo: "cmd+["),
+            ShortcutBinding(action: .navigateForwardActivePane, combo: "cmd+]"),
+            ShortcutBinding(action: .navigateUpActivePane, combo: "cmd+up")
+        ]
+    }
+
+    static func load(from rawValue: String) -> [ShortcutBinding] {
+        guard !rawValue.isEmpty, let data = rawValue.data(using: .utf8) else {
+            return defaultBindings
+        }
+
+        do {
+            return try JSONDecoder().decode([ShortcutBinding].self, from: data)
+        } catch {
+            return defaultBindings
+        }
+    }
+
+    static func save(_ shortcuts: [ShortcutBinding]) -> String {
+        do {
+            let data = try JSONEncoder().encode(shortcuts)
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            return ""
+        }
+    }
+}
+
+enum ShortcutParser {
+    private static let modifierOrder = ["cmd", "shift", "opt", "ctrl", "fn"]
+    private static let validSpecialKeys: Set<String> = [
+        "space", "delete", "tab", "enter", "return", "esc", "escape",
+        "up", "down", "left", "right",
+        "home", "end", "pageup", "pagedown",
+        "[", "]", "-", "=", ";", "'", ",", ".", "/", "\\"
+    ]
+
+    static func normalizedCombo(_ combo: String) -> String? {
+        let compact = combo
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "command", with: "cmd")
+            .replacingOccurrences(of: "option", with: "opt")
+            .replacingOccurrences(of: "alt", with: "opt")
+            .replacingOccurrences(of: "control", with: "ctrl")
+            .replacingOccurrences(of: "function", with: "fn")
+            .replacingOccurrences(of: "escape", with: "esc")
+            .replacingOccurrences(of: "return", with: "enter")
+            .replacingOccurrences(of: "uparrow", with: "up")
+            .replacingOccurrences(of: "downarrow", with: "down")
+            .replacingOccurrences(of: "leftarrow", with: "left")
+            .replacingOccurrences(of: "rightarrow", with: "right")
+
+        let parts = compact.split(separator: "+").map(String.init).filter { !$0.isEmpty }
+        guard !parts.isEmpty else { return nil }
+
+        var modifiers = Set<String>()
+        var key: String?
+
+        for part in parts {
+            switch part {
+            case "cmd", "shift", "opt", "ctrl", "fn":
+                modifiers.insert(part)
+            default:
+                guard key == nil else { return nil }
+                key = part
+            }
+        }
+
+        guard let keyToken = key, isValidKeyToken(keyToken) else { return nil }
+        let orderedModifiers = modifierOrder.filter { modifiers.contains($0) }
+        return (orderedModifiers + [keyToken]).joined(separator: "+")
+    }
+
+    static func comboFromEvent(_ event: NSEvent) -> String? {
+        let key = keyToken(from: event) ?? characterToken(from: event)
+        guard let key else { return nil }
+
+        var parts: [String] = []
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) { parts.append("cmd") }
+        if flags.contains(.shift) { parts.append("shift") }
+        if flags.contains(.option) { parts.append("opt") }
+        if flags.contains(.control) { parts.append("ctrl") }
+        if flags.contains(.function) { parts.append("fn") }
+        parts.append(key)
+        return parts.joined(separator: "+")
+    }
+
+    private static func isValidKeyToken(_ token: String) -> Bool {
+        if token.count == 1 { return true }
+        if token.hasPrefix("f"), let number = Int(token.dropFirst()), number >= 1, number <= 20 { return true }
+        return validSpecialKeys.contains(token)
+    }
+
+    private static func keyToken(from event: NSEvent) -> String? {
+        switch event.keyCode {
+        case 123: return "left"
+        case 124: return "right"
+        case 125: return "down"
+        case 126: return "up"
+        case 48: return "tab"
+        case 51: return "delete"
+        case 36, 76: return "enter"
+        case 53: return "esc"
+        case 122: return "f1"
+        case 120: return "f2"
+        case 99: return "f3"
+        case 118: return "f4"
+        case 96: return "f5"
+        case 97: return "f6"
+        case 98: return "f7"
+        case 100: return "f8"
+        case 101: return "f9"
+        case 109: return "f10"
+        case 103: return "f11"
+        case 111: return "f12"
+        default: return nil
+        }
+    }
+
+    private static func characterToken(from event: NSEvent) -> String? {
+        guard let chars = event.charactersIgnoringModifiers?.lowercased(), chars.count == 1 else {
+            return nil
+        }
+        let key = String(chars)
+        return isValidKeyToken(key) ? key : nil
+    }
+}
 
 @main
 struct FolderiumApp: App {
@@ -16,7 +230,6 @@ struct FolderiumApp: App {
                 Button("New Window") {
                     appDelegate.openNewWindow()
                 }
-                .keyboardShortcut("n", modifiers: [.command])
             }
         }
         
@@ -81,6 +294,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct SettingsView: View {
     @AppStorage("folderium.windowsFamiliarMode") private var windowsFamiliarMode: Bool = true
+    @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
+    @AppStorage(ShortcutStore.storageKey) private var shortcutsRaw: String = ""
+    @State private var shortcuts: [ShortcutBinding] = ShortcutStore.defaultBindings
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -95,10 +311,182 @@ struct SettingsView: View {
             Text("When enabled, Folderium prioritizes File Explorer-like labels and interactions.")
                 .font(.caption)
                 .foregroundColor(.secondary)
+
+            Divider()
+
+            Toggle("Soft Dark Theme", isOn: $softDarkThemeEnabled)
+
+            Text("Uses a charcoal-gray dark appearance that is easier on the eyes than pure black.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Divider()
+
+            ShortcutSettingsPanel(shortcuts: $shortcuts) {
+                shortcuts = ShortcutStore.defaultBindings
+                shortcutsRaw = ShortcutStore.save(shortcuts)
+            }
             
             Spacer()
         }
         .padding()
-        .frame(width: 400, height: 300)
+        .frame(width: 680, height: 520)
+        .onAppear {
+            shortcuts = ShortcutStore.load(from: shortcutsRaw)
+        }
+        .onChange(of: shortcuts) { _, newValue in
+            shortcutsRaw = ShortcutStore.save(newValue)
+        }
+    }
+}
+
+struct ShortcutSettingsPanel: View {
+    @Binding var shortcuts: [ShortcutBinding]
+    let onResetDefaults: () -> Void
+
+    @State private var inputErrors: [UUID: String] = [:]
+    
+    private var conflictsByID: [UUID: String] {
+        var grouped: [String: [ShortcutBinding]] = [:]
+        
+        for shortcut in shortcuts where shortcut.isEnabled {
+            guard let normalized = ShortcutParser.normalizedCombo(shortcut.combo) else { continue }
+            grouped[normalized, default: []].append(shortcut)
+        }
+        
+        var result: [UUID: String] = [:]
+        for (combo, entries) in grouped where entries.count > 1 {
+            let actionNames = entries.map { $0.action.title }.joined(separator: ", ")
+            for entry in entries {
+                result[entry.id] = "Conflict: '\(combo)' is assigned multiple times (\(actionNames))."
+            }
+        }
+        return result
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Keyboard Shortcuts")
+                    .font(.headline)
+                Spacer()
+                Button("Add Shortcut") {
+                    shortcuts.append(ShortcutBinding(action: .renameSelected, combo: "f2"))
+                }
+                .buttonStyle(.bordered)
+
+                Button("Reset Defaults") {
+                    onResetDefaults()
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Text("Edit combos like cmd+n, cmd+shift+n, f2, delete, cmd+[ or cmd+up.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            if !conflictsByID.isEmpty {
+                Text("There are \(conflictsByID.count) conflicting shortcut entries.")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(Array(shortcuts.enumerated()), id: \.element.id) { index, shortcut in
+                        let hasConflict = conflictsByID[shortcut.id] != nil
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Toggle("", isOn: bindingForEnabled(at: index))
+                                    .labelsHidden()
+                                    .help("Enable/disable this shortcut")
+
+                                Picker("Action", selection: bindingForAction(at: index)) {
+                                    ForEach(ShortcutAction.allCases) { action in
+                                        Text(action.title).tag(action)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+
+                                TextField("Shortcut", text: bindingForCombo(at: index))
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 180)
+                                    .onChange(of: shortcuts[index].combo) { _, newValue in
+                                        validateShortcutInput(for: shortcuts[index].id, combo: newValue)
+                                    }
+
+                                Button {
+                                    shortcuts.remove(at: index)
+                                    inputErrors[shortcut.id] = nil
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                            }
+
+                            if let message = inputErrors[shortcut.id] {
+                                Text(message)
+                                    .font(.caption2)
+                                    .foregroundColor(.orange)
+                            } else if let conflictMessage = conflictsByID[shortcut.id] {
+                                Text(conflictMessage)
+                                    .font(.caption2)
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                        .padding(8)
+                        .background(hasConflict ? Color.orange.opacity(0.14) : Color(NSColor.controlBackgroundColor))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(hasConflict ? Color.orange.opacity(0.7) : Color.clear, lineWidth: 1)
+                        )
+                        .cornerRadius(8)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .frame(maxHeight: 220)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Built-in (not editable)")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text("Up / Down Arrow - Move file selection in active pane")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private func validateShortcutInput(for id: UUID, combo: String) {
+        let normalized = ShortcutParser.normalizedCombo(combo)
+        if normalized == nil {
+            inputErrors[id] = "Invalid format."
+        } else {
+            inputErrors[id] = nil
+        }
+    }
+
+    private func bindingForAction(at index: Int) -> Binding<ShortcutAction> {
+        Binding(
+            get: { shortcuts[index].action },
+            set: { shortcuts[index].action = $0 }
+        )
+    }
+
+    private func bindingForCombo(at index: Int) -> Binding<String> {
+        Binding(
+            get: { shortcuts[index].combo },
+            set: { shortcuts[index].combo = $0 }
+        )
+    }
+
+    private func bindingForEnabled(at index: Int) -> Binding<Bool> {
+        Binding(
+            get: { shortcuts[index].isEnabled },
+            set: { shortcuts[index].isEnabled = $0 }
+        )
     }
 }

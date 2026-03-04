@@ -2,10 +2,11 @@ import SwiftUI
 
 struct ContentView: View {
     private let defaultPreviewWidthRatio: CGFloat = 0.22
+    @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
+    @AppStorage("folderium.isPreviewVisible") private var isPreviewVisible: Bool = true
+    @AppStorage("folderium.isNavigationPaneVisible") private var isNavigationPaneVisible: Bool = true
     @State private var selectedFiles: Set<URL> = []
     @State private var previewSelection: Set<URL> = []
-    @State private var isPreviewVisible: Bool = true
-    @State private var isNavigationPaneVisible: Bool = true
     @State private var previewWidthRatio: CGFloat = 0.22
     @State private var previewDragStartWidth: CGFloat?
     @State private var previewUpdateTask: Task<Void, Never>?
@@ -29,7 +30,7 @@ struct ContentView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
             }
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(FolderiumTheme.controlBackground(isSoftDark: softDarkThemeEnabled))
             
             Divider()
             
@@ -46,7 +47,7 @@ struct ContentView: View {
                     
                     if isPreviewVisible {
                         Rectangle()
-                            .fill(Color(NSColor.separatorColor))
+                            .fill(FolderiumTheme.separator(isSoftDark: softDarkThemeEnabled))
                             .frame(width: 6)
                             .contentShape(Rectangle())
                             .gesture(
@@ -96,6 +97,8 @@ struct ContentView: View {
                 }
             }
         }
+        .background(FolderiumTheme.windowBackground(isSoftDark: softDarkThemeEnabled))
+        .preferredColorScheme(softDarkThemeEnabled ? .dark : .light)
     }
 }
 
@@ -134,6 +137,7 @@ struct TabView: View {
 
 struct FilePreviewView: View {
     let selectedFiles: [URL]
+    @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
     
     var body: some View {
         VStack {
@@ -162,11 +166,13 @@ struct FilePreviewView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(FolderiumTheme.windowBackground(isSoftDark: softDarkThemeEnabled))
     }
 }
 
 struct FilePreviewItem: View {
     let file: URL
+    @AppStorage("folderium.softDarkThemeEnabled") private var softDarkThemeEnabled: Bool = false
     @State private var image: NSImage?
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -238,11 +244,11 @@ struct FilePreviewItem: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(FolderiumTheme.controlBackground(isSoftDark: softDarkThemeEnabled))
             .cornerRadius(8)
         }
         .padding()
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(FolderiumTheme.cardBackground(isSoftDark: softDarkThemeEnabled))
         .cornerRadius(12)
         .onAppear {
             loadPreview()
